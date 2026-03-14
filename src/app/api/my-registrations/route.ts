@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllOrders, getColumnValue, parseColorLabel, parseLinkedItemIds } from "@/lib/monday";
+import { getAllOrders, getColumnValue, getArtistTaxStatus, parseLinkedItemIds } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
 export async function GET() {
@@ -10,7 +10,10 @@ export async function GET() {
     }
 
     const artistId = parseInt(session.id, 10);
-    const items = await getAllOrders();
+    const [items, artistStatus] = await Promise.all([
+      getAllOrders(),
+      getArtistTaxStatus(artistId),
+    ]);
 
     const myRegistrations: {
       orderId: string;
@@ -58,7 +61,10 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({ registrations: myRegistrations });
+    return NextResponse.json({
+      registrations: myRegistrations,
+      artistStatus: artistStatus || undefined,
+    });
   } catch (error) {
     console.error("My registrations fetch error:", error);
     return NextResponse.json(

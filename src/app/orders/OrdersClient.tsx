@@ -107,9 +107,8 @@ export default function OrdersClient({ user }: OrdersClientProps) {
 
   // Build month list — only current month and future
   const availableMonths = useMemo(() => {
-    const curKey = getCurrentMonthKey();
     const keys = new Set<string>();
-    orders.forEach(o => { const k = parseMonthKey(o.date); if (k && k >= curKey) keys.add(k); });
+    orders.forEach(o => { const k = parseMonthKey(o.date); if (k) keys.add(k); });
     return Array.from(keys).sort();
   }, [orders]);
 
@@ -118,10 +117,12 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     if (selectedMonth === "upcoming") {
       const cur = getCurrentMonthKey();
       const next = getNextMonthKey();
-      return orders.filter(o => {
+      const filtered = orders.filter(o => {
         const k = parseMonthKey(o.date);
         return k === cur || k === next;
       });
+      // If no orders in current/next month, fall back to all orders
+      return filtered.length > 0 ? filtered : orders;
     }
     return orders.filter(o => parseMonthKey(o.date) === selectedMonth);
   }, [orders, selectedMonth]);

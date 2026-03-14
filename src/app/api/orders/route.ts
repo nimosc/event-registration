@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getOpenOrders, getColumnValue, parseColorLabel, parseLinkedItemIds } from "@/lib/monday";
+import { getOpenOrders, getColumnValue, parseLinkedItemIds } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
 export interface OrderData {

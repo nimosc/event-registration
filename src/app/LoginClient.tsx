@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 interface LoginClientProps {
@@ -68,11 +69,15 @@ export default function LoginClient({ magicId }: LoginClientProps) {
 
       <div className="relative w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-500 rounded-2xl shadow-lg shadow-blue-200 mb-4">
-            <svg className="w-9 h-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
+          <div className="inline-flex items-center justify-center mb-4">
+            <Image
+              src="https://d33zzd4k5u0xj2.cloudfront.net/eu-central-1/workforms-form-logos/d2838fce-3c76-48ff-88dc-efb4b28e39be_581908"
+              alt="לוגו העמותה"
+              width={160}
+              height={80}
+              className="h-20 w-auto object-contain"
+              priority
+            />
           </div>
           <h1 className="text-2xl font-bold text-gray-900">מערכת רישום לאירועים</h1>
           <p className="text-gray-500 text-sm mt-1">

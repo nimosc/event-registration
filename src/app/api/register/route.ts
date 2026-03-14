@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getOpenOrders,
+  getAllOrders,
   createSubitem,
   deleteSubitem,
   updateAssignedCount,
@@ -133,10 +134,13 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Fetch order to get current assigned count
-    const items = await getOpenOrders();
-    const order = items.find((item) => item.id === orderId);
-
+    // Fetch order (open first; fallback to all for "ההזמנות שלי" unregister)
+    let items = await getOpenOrders();
+    let order = items.find((item) => item.id === orderId);
+    if (!order) {
+      items = await getAllOrders();
+      order = items.find((item) => item.id === orderId);
+    }
     if (!order) {
       return NextResponse.json(
         { error: "הזמנה לא נמצאה" },

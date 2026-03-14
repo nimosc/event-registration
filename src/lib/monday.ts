@@ -131,6 +131,36 @@ export async function getAllArtists() {
   return data.boards[0]?.items_page?.items ?? [];
 }
 
+/** Artists board column for tax status: "מורשה" or "פטור" */
+export const ARTIST_TAX_STATUS_COLUMN_ID = "color_mm1axnas";
+
+/** Get artist tax status (מורשה / פטור) by artist item id. Used for income calculation. */
+export async function getArtistTaxStatus(artistId: number): Promise<"מורשה" | "פטור" | ""> {
+  const query = `
+    query {
+      boards(ids: [${BOARDS.ARTISTS}]) {
+        items_page(limit: 500) {
+          items {
+            id
+            column_values(ids: ["${ARTIST_TAX_STATUS_COLUMN_ID}"]) {
+              id
+              text
+            }
+          }
+        }
+      }
+    }
+  `;
+  const data = await mondayQuery<{ boards: MondayBoard[] }>(query);
+  const items = data.boards[0]?.items_page?.items ?? [];
+  const artist = items.find((item) => item.id === String(artistId));
+  if (!artist) return "";
+  const col = getColumnValue(artist, ARTIST_TAX_STATUS_COLUMN_ID);
+  const label = (col?.text || "").trim();
+  if (label === "פטור" || label === "מורשה") return label;
+  return "";
+}
+
 // ─── Query: Get open orders ───────────────────────────────────────────────────
 
 export async function getOpenOrders() {

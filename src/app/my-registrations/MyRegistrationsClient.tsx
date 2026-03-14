@@ -41,12 +41,6 @@ function getCurrentMonthKey(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function getNextMonthKey(): string {
-  const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
-}
-
 function AttendanceBadge({ status }: { status: string }) {
   if (!status) return (
     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-600 border border-amber-200">
@@ -78,57 +72,26 @@ function formatDate(dateStr: string): string {
   return `${parseInt(day)} ב${HEBREW_MONTHS[parseInt(month)]} ${year}`;
 }
 
-function RegistrationCard({ reg }: { reg: Registration }) {
-  return (
-    <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-shadow hover:shadow-md ${
-      reg.attendanceStatus === "מאושר" ? "border-emerald-200" :
-      reg.attendanceStatus === "נדחה" ? "border-red-200" : "border-gray-100"
-    }`}>
-      <div className={`h-1 ${
-        reg.attendanceStatus === "מאושר" ? "bg-emerald-400" :
-        reg.attendanceStatus === "נדחה" ? "bg-red-400" : "bg-blue-300"
-      }`} />
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-gray-900 text-base leading-snug truncate">{reg.orderName}</h3>
-            {reg.role && (
-              <span className="inline-block mt-1 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{reg.role}</span>
-            )}
-          </div>
-          <AttendanceBadge status={reg.attendanceStatus} />
-        </div>
-        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
-          {reg.date && (
-            <div className="flex items-center gap-1.5 text-sm text-gray-500">
-              <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              {formatDate(reg.date)}
-            </div>
-          )}
-          {reg.location && (
-            <div className="flex items-center gap-1.5 text-sm text-gray-500">
-              <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              {reg.location}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+/** DD/MM/YY for table */
+function formatDateDDMMYY(dateStr: string): string {
+  if (!dateStr) return "—";
+  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return dateStr;
+  const [, y, m, d] = match;
+  const yy = y!.slice(-2);
+  return `${d}/${m}/${yy}`;
 }
 
 export default function MyRegistrationsClient({ user }: MyRegistrationsClientProps) {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState<string>("upcoming");
+  const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthKey());
+  const [invoiceFor, setInvoiceFor] = useState<Registration | null>(null);
+  const [showMonthInvoiceModal, setShowMonthInvoiceModal] = useState(false);
+  const [unregisteringId, setUnregisteringId] = useState<string | null>(null);
+
+  const [artistStatus, setArtistStatus] = useState<"מורשה" | "פטור" | "">("");
 
   const fetchRegistrations = useCallback(async () => {
     setLoading(true);
@@ -141,6 +104,7 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
         (a.date || "").localeCompare(b.date || "")
       );
       setRegistrations(sorted);
+      setArtistStatus(data.artistStatus ?? "");
     } catch {
       setError("שגיאת רשת.");
     } finally {
@@ -150,23 +114,38 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
 
   useEffect(() => { fetchRegistrations(); }, [fetchRegistrations]);
 
+  const handleUnregister = useCallback(async (reg: Registration) => {
+    if (!confirm(`להסיר את ההרשמה להזמנה "${reg.orderName}"?`)) return;
+    setUnregisteringId(reg.subitemId);
+    setError(null);
+    try {
+      const res = await fetch("/api/register", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: reg.orderId, subitemId: reg.subitemId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "שגיאה בביטול הרישום");
+        return;
+      }
+      await fetchRegistrations();
+    } catch {
+      setError("שגיאת רשת.");
+    } finally {
+      setUnregisteringId(null);
+    }
+  }, [fetchRegistrations]);
+
   const availableMonths = useMemo(() => {
     const curKey = getCurrentMonthKey();
-    const keys = new Set<string>();
-    registrations.forEach(r => { const k = parseMonthKey(r.date); if (k && k >= curKey) keys.add(k); });
+    const keys = new Set<string>([curKey]);
+    registrations.forEach(r => { const k = parseMonthKey(r.date); if (k) keys.add(k); });
     return Array.from(keys).sort();
   }, [registrations]);
 
   const filtered = useMemo(() => {
     if (selectedMonth === "all") return registrations;
-    if (selectedMonth === "upcoming") {
-      const cur = getCurrentMonthKey();
-      const next = getNextMonthKey();
-      return registrations.filter(r => {
-        const k = parseMonthKey(r.date);
-        return k === cur || k === next;
-      });
-    }
     return registrations.filter(r => parseMonthKey(r.date) === selectedMonth);
   }, [registrations, selectedMonth]);
 
@@ -174,8 +153,36 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
   const pendingCount = registrations.filter(r => !r.attendanceStatus).length;
 
   const today = new Date().toISOString().split("T")[0];
-  const upcomingRegs = filtered.filter(r => !r.date || r.date >= today);
-  const pastRegs = filtered.filter(r => r.date && r.date < today);
+  const canUnregister = (reg: Registration) => !reg.date || reg.date >= today;
+
+  const FIRST_EVENT_PAY_PATUR = 1000;
+  const ADDITIONAL_EVENT_PAY_PATUR = 800;
+  const PAY_MORESH = 1000;
+
+  const { incomeBySubitemId, totalIncomeForFiltered } = useMemo(() => {
+    const byId: Record<string, number> = {};
+    const byMonth = new Map<string, Registration[]>();
+    for (const reg of filtered) {
+      const k = parseMonthKey(reg.date) || "none";
+      if (!byMonth.has(k)) byMonth.set(k, []);
+      byMonth.get(k)!.push(reg);
+    }
+    let total = 0;
+    for (const regs of byMonth.values()) {
+      const sorted = [...regs].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      for (let i = 0; i < sorted.length; i++) {
+        const amount =
+          artistStatus === "פטור"
+            ? i === 0
+              ? FIRST_EVENT_PAY_PATUR
+              : ADDITIONAL_EVENT_PAY_PATUR
+            : PAY_MORESH;
+        byId[sorted[i].subitemId] = amount;
+        total += amount;
+      }
+    }
+    return { incomeBySubitemId: byId, totalIncomeForFiltered: total };
+  }, [filtered, artistStatus]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -230,19 +237,9 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
         </div>
 
         {/* Month Filter */}
-        {!loading && availableMonths.length > 0 && (
+        {!loading && (availableMonths.length > 0 || selectedMonth) && (
           <div className="mb-6 -mx-1">
             <div className="flex gap-2 overflow-x-auto pb-1 px-1 scrollbar-hide">
-              <button
-                onClick={() => setSelectedMonth("upcoming")}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  selectedMonth === "upcoming"
-                    ? "bg-gray-900 text-white shadow-sm"
-                    : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
-                }`}
-              >
-                החודש + הבא
-              </button>
               <button
                 onClick={() => setSelectedMonth("all")}
                 className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
@@ -318,46 +315,155 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <p className="text-gray-500 mb-3">אין רישומים בתקופה זו</p>
-            <button onClick={() => setSelectedMonth("all")} className="text-sm text-blue-500 hover:underline">
-              הצג את כל החודשים
-            </button>
+            <p className="text-gray-500 mb-3">
+              {selectedMonth === "all" ? "אין רישומים" : "אין רישומים בחודש זה"}
+            </p>
+            {selectedMonth !== "all" && (
+              <button onClick={() => setSelectedMonth("all")} className="text-sm text-blue-500 hover:underline">
+                הצג את כל החודשים
+              </button>
+            )}
           </div>
         ) : (
-          <div className="space-y-8">
-
-            {/* Upcoming */}
-            {upcomingRegs.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1 h-4 bg-blue-500 rounded-full" />
-                  <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">קרובות</h2>
-                  <span className="text-xs bg-blue-100 text-blue-600 font-semibold px-2 py-0.5 rounded-full">{upcomingRegs.length}</span>
-                </div>
-                <div className="space-y-3">
-                  {upcomingRegs.map(reg => (
-                    <RegistrationCard key={reg.subitemId} reg={reg} />
+          <>
+          {filtered.length > 0 && selectedMonth !== "all" && (
+            <div className="mb-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowMonthInvoiceModal(true)}
+                className="btn-primary inline-flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                העלה חשבוניות לחודש
+              </button>
+            </div>
+          )}
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm shadow-gray-200/50">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-right border-collapse">
+                <thead>
+                  <tr className="bg-gray-100 border-b border-gray-200">
+                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">מיקום</th>
+                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">תאריך</th>
+                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">נוכחות</th>
+                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">הכנסה</th>
+                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600 uppercase tracking-wider pr-5">פעולות</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filtered.map(reg => (
+                    <tr key={reg.subitemId} className="bg-white hover:bg-gray-50/70 transition-colors">
+                      <td className="px-5 py-4 font-medium text-gray-900">{reg.location || reg.orderName || "—"}</td>
+                      <td className="px-5 py-4">
+                        <span className="inline-block px-3 py-1.5 rounded-lg bg-gray-100 border border-gray-200 text-sm font-medium text-gray-800 tabular-nums">
+                          {formatDateDDMMYY(reg.date)}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <AttendanceBadge status={reg.attendanceStatus} />
+                      </td>
+                      <td className="px-5 py-4 text-sm font-semibold text-gray-800 tabular-nums whitespace-nowrap">
+                        {incomeBySubitemId[reg.subitemId] != null
+                          ? `${incomeBySubitemId[reg.subitemId].toLocaleString("he-IL")} ₪`
+                          : "—"}
+                      </td>
+                      <td className="px-5 py-4 pr-5 whitespace-nowrap">
+                        <div className="flex flex-wrap gap-2 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setInvoiceFor(reg)}
+                            className="btn-secondary text-xs py-2 px-3 rounded-lg"
+                          >
+                            חשבונית
+                          </button>
+                          {canUnregister(reg) && (
+                            <button
+                              type="button"
+                              onClick={() => handleUnregister(reg)}
+                              disabled={unregisteringId === reg.subitemId}
+                              className="btn-danger text-xs py-2 px-3 rounded-lg"
+                            >
+                              {unregisteringId === reg.subitemId ? "..." : "הסר הרשמה"}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              </section>
+                </tbody>
+              </table>
+            </div>
+            {filtered.length > 0 && (
+              <div className="border-t-2 border-gray-200 bg-gray-100 px-5 py-4 text-left">
+                <span className="text-base font-bold text-gray-800">
+                  סך הכל {selectedMonth === "all" ? "" : "לחודש"}:{" "}
+                  <span className="text-gray-900 tabular-nums">{totalIncomeForFiltered.toLocaleString("he-IL")} ₪</span>
+                </span>
+              </div>
             )}
+          </div>
+          </>
+        )}
 
-            {/* Past */}
-            {pastRegs.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1 h-4 bg-gray-300 rounded-full" />
-                  <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">עברו</h2>
-                  <span className="text-xs bg-gray-100 text-gray-500 font-semibold px-2 py-0.5 rounded-full">{pastRegs.length}</span>
-                </div>
-                <div className="space-y-3 opacity-60">
-                  {pastRegs.map(reg => (
-                    <RegistrationCard key={reg.subitemId} reg={reg} />
+        {/* Month invoices modal */}
+        {showMonthInvoiceModal && filtered.length > 0 && selectedMonth !== "all" && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowMonthInvoiceModal(false)}>
+            <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden border border-gray-200 flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">העלאת חשבוניות לחודש</h3>
+                <p className="text-sm text-gray-500 mt-1">{monthKeyToLabel(selectedMonth)} — {filtered.length} אירועים</p>
+              </div>
+              <div className="p-6 overflow-y-auto flex-1">
+                <ul className="mb-4 space-y-2 text-sm text-gray-600">
+                  {filtered.map(reg => (
+                    <li key={reg.subitemId} className="flex justify-between gap-2">
+                      <span>{reg.location || reg.orderName || "—"}</span>
+                      <span className="tabular-nums text-gray-500">{formatDateDDMMYY(reg.date)}</span>
+                    </li>
                   ))}
-                </div>
-              </section>
-            )}
+                </ul>
+                <form onSubmit={e => { e.preventDefault(); setShowMonthInvoiceModal(false); }} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">קישור או קבצים (לא פעיל)</label>
+                    <input type="text" className="input-field" placeholder="קישור / העלאה לכל החשבוניות של החודש" readOnly />
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button type="button" onClick={() => setShowMonthInvoiceModal(false)} className="btn-secondary">
+                      ביטול
+                    </button>
+                    <button type="submit" className="btn-primary">
+                      שמירה (לא פעיל)
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
 
+        {/* Invoice placeholder modal */}
+        {invoiceFor && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setInvoiceFor(null)}>
+            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200" onClick={e => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">העלאת חשבונית</h3>
+              <p className="text-sm text-gray-500 mb-4">{invoiceFor.orderName}</p>
+              <form onSubmit={e => { e.preventDefault(); setInvoiceFor(null); }} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">קישור או הערה</label>
+                  <input type="text" className="input-field" placeholder="קישור לקובץ / הערה" readOnly />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button type="button" onClick={() => setInvoiceFor(null)} className="btn-secondary">
+                    ביטול
+                  </button>
+                  <button type="submit" className="btn-primary">
+                    שמירה (לא פעיל)
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </main>
