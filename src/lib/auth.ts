@@ -8,6 +8,7 @@ export interface SessionUser {
   id: string;
   name: string;
   role: "אומן" | "מנהל";
+  location?: string;
 }
 
 function getSecret(): Uint8Array {
@@ -37,6 +38,7 @@ export async function verifySession(token: string): Promise<SessionUser | null> 
       id: payload.id as string,
       name: payload.name as string,
       role: payload.role as "אומן" | "מנהל",
+      location: payload.location as string | undefined,
     };
   } catch {
     return null;

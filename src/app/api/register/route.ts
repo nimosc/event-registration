@@ -9,6 +9,9 @@ import {
   getColumnValue,
   parseColorLabel,
   parseLinkedItemIds,
+  STATUS_OPEN,
+  STATUS_CANDIDACY_CLOSED,
+  STATUS_ASSIGNMENT_DONE,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
@@ -29,7 +32,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch the order to validate
     const items = await getOpenOrders();
     const order = items.find((item) => item.id === orderId);
 
@@ -43,9 +45,9 @@ export async function POST(request: NextRequest) {
     const statusCol = getColumnValue(order, "color_mm18ej76");
     const status = statusCol?.text || "";
 
-    if (status !== "בתהליך שיבוץ") {
+    if (status !== STATUS_OPEN) {
       return NextResponse.json(
-        { error: "ההזמנה אינה פתוחה לרישום" },
+        { error: "ההזמנה אינה פתוחה להגשת מועמדות" },
         { status: 400 }
       );
     }
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
     const eventDate = dateCol?.text ? new Date(dateCol.text) : null;
     if (eventDate && eventDate < new Date(new Date().toDateString())) {
       return NextResponse.json(
-        { error: "לא ניתן להירשם למועד שעבר" },
+        { error: "לא ניתן להגיש מועמדות למועד שעבר" },
         { status: 400 }
       );
     }
@@ -63,8 +65,9 @@ export async function POST(request: NextRequest) {
     const assignedCol = getColumnValue(order, "numeric_mm18d914");
     const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
     const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
+    const capacityLimit = requiredCount > 0 ? Math.ceil(requiredCount * 1.5) : 0;
 
-    // Check if already registered
+    // Check if already submitted candidacy
     const artistId = parseInt(session.id, 10);
     const subitems = order.subitems || [];
     const alreadyRegistered = subitems.some((sub) => {
@@ -77,14 +80,14 @@ export async function POST(request: NextRequest) {
 
     if (alreadyRegistered) {
       return NextResponse.json(
-        { error: "כבר רשום להזמנה זו" },
+        { error: "כבר הגשת מועמדות להזמנה זו" },
         { status: 400 }
       );
     }
 
-    if (requiredCount > 0 && assignedCount >= requiredCount) {
+    if (capacityLimit > 0 && assignedCount >= capacityLimit) {
       return NextResponse.json(
-        { error: "ההזמנה מלאה" },
+        { error: "נסגרה קבלת מועמדויות להזמנה זו" },
         { status: 400 }
       );
     }
@@ -96,9 +99,9 @@ export async function POST(request: NextRequest) {
     const newAssignedCount = assignedCount + 1;
     await updateAssignedCount(orderId, newAssignedCount);
 
-    // If now full, update order status
-    if (requiredCount > 0 && newAssignedCount >= requiredCount) {
-      await updateOrderStatus(orderId, "הסתיים השיבוץ");
+    // If reached 150% capacity, close candidacies
+    if (capacityLimit > 0 && newAssignedCount >= capacityLimit) {
+      await updateOrderStatus(orderId, STATUS_CANDIDACY_CLOSED);
     }
 
     return NextResponse.json({
@@ -108,7 +111,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Register error:", error);
     return NextResponse.json(
-      { error: "שגיאה בתהליך הרישום" },
+      { error: "שגיאה בהגשת המועמדות" },
       { status: 500 }
     );
   }
@@ -134,7 +137,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Fetch order (open first; fallback to all for "ההזמנות שלי" unregister)
+    // Fetch order (open first; fallback to all for "המועמדויות שלי" unregister)
     let items = await getOpenOrders();
     let order = items.find((item) => item.id === orderId);
     if (!order) {
@@ -152,7 +155,7 @@ export async function DELETE(request: NextRequest) {
     const eventDate2 = dateCol2?.text ? new Date(dateCol2.text) : null;
     if (eventDate2 && eventDate2 < new Date(new Date().toDateString())) {
       return NextResponse.json(
-        { error: "לא ניתן לבטל רישום למועד שעבר" },
+        { error: "לא ניתן לבטל מועמדות למועד שעבר" },
         { status: 400 }
       );
     }
@@ -167,18 +170,18 @@ export async function DELETE(request: NextRequest) {
     const newAssignedCount = Math.max(0, assignedCount - 1);
     await updateAssignedCount(orderId, newAssignedCount);
 
-    // If it was previously full, reopen it
+    // If order was closed (either status), reopen it
     const statusCol = getColumnValue(order, "color_mm18ej76");
     const status = statusCol?.text || "";
-    if (status === "הסתיים השיבוץ") {
-      await updateOrderStatus(orderId, "בתהליך שיבוץ");
+    if (status === STATUS_CANDIDACY_CLOSED || status === STATUS_ASSIGNMENT_DONE) {
+      await updateOrderStatus(orderId, STATUS_OPEN);
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Unregister error:", error);
     return NextResponse.json(
-      { error: "שגיאה בביטול הרישום" },
+      { error: "שגיאה בביטול המועמדות" },
       { status: 500 }
     );
   }

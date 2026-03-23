@@ -108,6 +108,12 @@ export function parseLinkedItemIds(value: string | null | undefined): number[] {
 
 // ─── Query: Get all artists (for login) ───────────────────────────────────────
 
+export const ARTIST_LOCATION_COLUMN_ID = "dropdown_mm1q49dy";
+export const ORDER_LOCATION_COLUMN_ID = "dropdown_mm1qvq5q";
+export const STATUS_OPEN = "בתהליך שיבוץ";
+export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
+export const STATUS_ASSIGNMENT_DONE = "הסתיים השיבוץ";
+
 export async function getAllArtists() {
   const query = `
     query {
@@ -116,7 +122,7 @@ export async function getAllArtists() {
           items {
             id
             name
-            column_values(ids: ["text_mm18xbdq", "text_mm18d6vn", "color_mm18btbr", "color_mm18wjry"]) {
+            column_values(ids: ["text_mm18xbdq", "text_mm18d6vn", "color_mm18btbr", "color_mm18wjry", "${ARTIST_LOCATION_COLUMN_ID}"]) {
               id
               text
               value
@@ -171,7 +177,7 @@ export async function getOpenOrders() {
           items {
             id
             name
-            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914"]) {
+            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ORDER_LOCATION_COLUMN_ID}"]) {
               id
               text
               value
@@ -345,6 +351,31 @@ export async function updateOrderStatus(
   `;
 
   await mondayQuery(query);
+}
+
+// ─── Query: Get single order with subitems (for confirm logic) ────────────────
+
+export async function getOrderById(orderId: string) {
+  const query = `
+    query {
+      items(ids: [${orderId}]) {
+        id
+        column_values(ids: ["color_mm18ej76", "numeric_mm185aw7"]) {
+          id
+          text
+        }
+        subitems {
+          id
+          column_values(ids: ["color_mm18bjdk"]) {
+            id
+            text
+          }
+        }
+      }
+    }
+  `;
+  const data = await mondayQuery<{ items: MondayItem[] }>(query);
+  return data.items?.[0] ?? null;
 }
 
 // ─── Mutation: Update attendance confirmation ─────────────────────────────────

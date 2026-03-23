@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAllArtists, getColumnValue, parseColorLabel } from "@/lib/monday";
+import { getAllArtists, getColumnValue, parseColorLabel, ARTIST_LOCATION_COLUMN_ID } from "@/lib/monday";
 import { createSession, setSessionCookie, clearSessionCookie, SessionUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
@@ -48,10 +48,14 @@ export async function POST(request: NextRequest) {
     const role: SessionUser["role"] =
       roleLabel === "מנהל" ? "מנהל" : "אומן";
 
+    const locationCol = getColumnValue(artist, ARTIST_LOCATION_COLUMN_ID);
+    const location = locationCol?.text?.trim() || undefined;
+
     const user: SessionUser = {
       id: artist.id,
       name: artist.name,
       role,
+      location,
     };
 
     const token = await createSession(user);

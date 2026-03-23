@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mondayQuery, BOARDS } from "@/lib/monday";
+import { mondayQuery, BOARDS, ARTIST_LOCATION_COLUMN_ID } from "@/lib/monday";
 import { createSession, setSessionCookie, SessionUser } from "@/lib/auth";
 
 interface ArtistItem {
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
           id
           name
           board { id }
-          column_values(ids: ["color_mm18btbr", "color_mm18wjry"]) {
+          column_values(ids: ["color_mm18btbr", "color_mm18wjry", "${ARTIST_LOCATION_COLUMN_ID}"]) {
             id
             text
           }
@@ -48,7 +48,10 @@ export async function GET(request: NextRequest) {
     const roleCol = artist.column_values.find((cv) => cv.id === "color_mm18btbr");
     const role: SessionUser["role"] = roleCol?.text === "מנהל" ? "מנהל" : "אומן";
 
-    const user: SessionUser = { id: artist.id, name: artist.name, role };
+    const locationCol = artist.column_values.find((cv) => cv.id === ARTIST_LOCATION_COLUMN_ID);
+    const location = locationCol?.text?.trim() || undefined;
+
+    const user: SessionUser = { id: artist.id, name: artist.name, role, location };
     const token = await createSession(user);
     await setSessionCookie(token);
 

@@ -51,7 +51,7 @@ function EmptyState({ filtered }: { filtered: boolean }) {
         {filtered ? "אין הזמנות בחודש זה" : "אין הזמנות פתוחות"}
       </h3>
       <p className="text-sm text-gray-400 max-w-xs">
-        {filtered ? "נסה לבחור חודש אחר או הצג את כל ההזמנות" : "כרגע אין הזמנות פתוחות לרישום. בדוק שוב מאוחר יותר."}
+        {filtered ? "נסה לבחור חודש אחר או הצג את כל ההזמנות" : "כרגע אין הזמנות פתוחות להגשת מועמדות. בדוק שוב מאוחר יותר."}
       </p>
     </div>
   );
@@ -83,6 +83,8 @@ export default function OrdersClient({ user }: OrdersClientProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string>("upcoming");
+  const [selectedLocation, setSelectedLocation] = useState<string>("all");
+  const [locationInitialized, setLocationInitialized] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(Date.now());
 
   const fetchOrders = useCallback(async () => {
@@ -105,27 +107,54 @@ export default function OrdersClient({ user }: OrdersClientProps) {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders, lastRefresh]);
 
-  // Build month list — only current month and future
+  // Initialize location filter based on artist's location
+  useEffect(() => {
+    if (!locationInitialized && orders.length > 0 && user.location) {
+      const locs = orders.map(o => o.orderLocation).filter(Boolean);
+      if (locs.includes(user.location)) {
+        setSelectedLocation(user.location);
+      }
+      setLocationInitialized(true);
+    } else if (!locationInitialized && orders.length > 0) {
+      setLocationInitialized(true);
+    }
+  }, [orders, user.location, locationInitialized]);
+
+  // Build month list
   const availableMonths = useMemo(() => {
     const keys = new Set<string>();
     orders.forEach(o => { const k = parseMonthKey(o.date); if (k) keys.add(k); });
     return Array.from(keys).sort();
   }, [orders]);
 
+  // Build location list
+  const availableLocations = useMemo(() => {
+    const locs = new Set<string>();
+    orders.forEach(o => { if (o.orderLocation) locs.add(o.orderLocation); });
+    return Array.from(locs).sort();
+  }, [orders]);
+
   const filteredOrders = useMemo(() => {
-    if (selectedMonth === "all") return orders;
+    let result = orders;
+
+    // Location filter
+    if (selectedLocation !== "all") {
+      result = result.filter(o => o.orderLocation === selectedLocation);
+    }
+
+    // Month filter
+    if (selectedMonth === "all") return result;
     if (selectedMonth === "upcoming") {
       const cur = getCurrentMonthKey();
       const next = getNextMonthKey();
-      const filtered = orders.filter(o => {
+      const filtered = result.filter(o => {
         const k = parseMonthKey(o.date);
         return k === cur || k === next;
       });
-      // If no orders in current/next month, fall back to all orders
-      return filtered.length > 0 ? filtered : orders;
+      return filtered.length > 0 ? filtered : result;
     }
-    return orders.filter(o => parseMonthKey(o.date) === selectedMonth);
-  }, [orders, selectedMonth]);
+    return result.filter(o => parseMonthKey(o.date) === selectedMonth);
+  }, [orders, selectedMonth, selectedLocation]);
 
   async function handleRegister(orderId: string) {
     const res = await fetch("/api/register", {
@@ -134,7 +163,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       body: JSON.stringify({ orderId }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "שגיאה בתהליך הרישום");
+    if (!res.ok) throw new Error(data.error || "שגיאה בהגשת המועמדות");
     setOrders(prev => prev.map(o =>
       o.id === orderId
         ? { ...o, isRegistered: true, subitemId: data.subitemId, assignedCount: o.assignedCount + 1, spotsRemaining: Math.max(0, o.spotsRemaining - 1) }
@@ -149,17 +178,13 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       body: JSON.stringify({ orderId, subitemId }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "שגיאה בביטול הרישום");
-    setOrders(prev => prev.map(o =>
-      o.id === orderId
-        ? { ...o, isRegistered: false, subitemId: undefined, assignedCount: Math.max(0, o.assignedCount - 1), spotsRemaining: o.spotsRemaining + 1, status: "בתהליך שיבוץ" }
-        : o
-    ));
+    if (!res.ok) throw new Error(data.error || "שגיאה בביטול המועמדות");
+    setOrders(prev => prev.filter(o => o.id !== orderId));
   }
 
   const myOrders = filteredOrders.filter(o => o.isRegistered);
   const openOrders = filteredOrders.filter(o => !o.isRegistered && (o.requiredCount === 0 || o.spotsRemaining > 0));
-  const fullOrders = filteredOrders.filter(o => !o.isRegistered && o.requiredCount > 0 && o.spotsRemaining <= 0);
+  const closedOrders = filteredOrders.filter(o => !o.isRegistered && o.requiredCount > 0 && o.spotsRemaining <= 0);
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -206,58 +231,94 @@ export default function OrdersClient({ user }: OrdersClientProps) {
                 <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-sm">
                   <span className="w-2 h-2 rounded-full bg-blue-500" />
                   <span className="text-blue-700 font-medium">{myOrders.length}</span>
-                  <span className="text-blue-600">הרשמות שלי</span>
+                  <span className="text-blue-600">המועמדויות שלי</span>
                 </div>
               )}
               {openOrders.length > 0 && (
                 <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2 text-sm">
                   <span className="w-2 h-2 rounded-full bg-green-500" />
                   <span className="text-green-700 font-medium">{openOrders.length}</span>
-                  <span className="text-green-600">זמינות להרשמה</span>
+                  <span className="text-green-600">פתוחות למועמדות</span>
                 </div>
               )}
             </div>
           )}
         </div>
 
-        {/* Month Filter */}
-        {!loading && availableMonths.length > 0 && (
-          <div className="mb-6 -mx-1">
-            <div className="flex gap-2 overflow-x-auto pb-1 px-1 scrollbar-hide">
-              <button
-                onClick={() => setSelectedMonth("upcoming")}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  selectedMonth === "upcoming"
-                    ? "bg-gray-900 text-white shadow-sm"
-                    : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
-                }`}
-              >
-                החודש + הבא
-              </button>
-              <button
-                onClick={() => setSelectedMonth("all")}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  selectedMonth === "all"
-                    ? "bg-gray-900 text-white shadow-sm"
-                    : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
-                }`}
-              >
-                כל החודשים
-              </button>
-              {availableMonths.map(key => (
-                <button
-                  key={key}
-                  onClick={() => setSelectedMonth(key)}
-                  className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    selectedMonth === key
-                      ? "bg-gray-900 text-white shadow-sm"
-                      : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
-                  }`}
-                >
-                  {monthKeyToLabel(key)}
-                </button>
-              ))}
-            </div>
+        {/* Filters row: month + location */}
+        {!loading && (availableMonths.length > 0 || availableLocations.length > 0) && (
+          <div className="mb-6 flex flex-col gap-3">
+            {/* Month filter */}
+            {availableMonths.length > 0 && (
+              <div className="-mx-1">
+                <div className="flex gap-2 overflow-x-auto pb-1 px-1 scrollbar-hide">
+                  <button
+                    onClick={() => setSelectedMonth("upcoming")}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      selectedMonth === "upcoming"
+                        ? "bg-gray-900 text-white shadow-sm"
+                        : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    }`}
+                  >
+                    החודש + הבא
+                  </button>
+                  <button
+                    onClick={() => setSelectedMonth("all")}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      selectedMonth === "all"
+                        ? "bg-gray-900 text-white shadow-sm"
+                        : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    }`}
+                  >
+                    כל החודשים
+                  </button>
+                  {availableMonths.map(key => (
+                    <button
+                      key={key}
+                      onClick={() => setSelectedMonth(key)}
+                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        selectedMonth === key
+                          ? "bg-gray-900 text-white shadow-sm"
+                          : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                      }`}
+                    >
+                      {monthKeyToLabel(key)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Location filter */}
+            {availableLocations.length > 0 && (
+              <div className="-mx-1">
+                <div className="flex gap-2 overflow-x-auto pb-1 px-1 scrollbar-hide">
+                  <button
+                    onClick={() => setSelectedLocation("all")}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      selectedLocation === "all"
+                        ? "bg-indigo-600 text-white shadow-sm"
+                        : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    }`}
+                  >
+                    כל הלוקיישנים
+                  </button>
+                  {availableLocations.map(loc => (
+                    <button
+                      key={loc}
+                      onClick={() => setSelectedLocation(loc)}
+                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        selectedLocation === loc
+                          ? "bg-indigo-600 text-white shadow-sm"
+                          : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                      }`}
+                    >
+                      {loc}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -275,16 +336,16 @@ export default function OrdersClient({ user }: OrdersClientProps) {
         {loading ? (
           <LoadingSkeleton />
         ) : filteredOrders.length === 0 ? (
-          <EmptyState filtered={selectedMonth !== "all"} />
+          <EmptyState filtered={selectedMonth !== "all" || selectedLocation !== "all"} />
         ) : (
           <div className="space-y-8">
 
-            {/* My registrations */}
+            {/* My candidacies */}
             {myOrders.length > 0 && (
               <section>
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-1 h-4 bg-blue-500 rounded-full" />
-                  <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">הרשמות שלי</h2>
+                  <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">המועמדויות שלי</h2>
                   <span className="text-xs bg-blue-100 text-blue-600 font-semibold px-2 py-0.5 rounded-full">{myOrders.length}</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -295,12 +356,12 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               </section>
             )}
 
-            {/* Available */}
+            {/* Open for candidacy */}
             {openOrders.length > 0 && (
               <section>
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-1 h-4 bg-green-500 rounded-full" />
-                  <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">פתוחות להרשמה</h2>
+                  <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">פתוחות למועמדות</h2>
                   <span className="text-xs bg-green-100 text-green-600 font-semibold px-2 py-0.5 rounded-full">{openOrders.length}</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -311,16 +372,16 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               </section>
             )}
 
-            {/* Full */}
-            {fullOrders.length > 0 && (
+            {/* Closed for candidacy */}
+            {closedOrders.length > 0 && (
               <section>
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-1 h-4 bg-gray-300 rounded-full" />
-                  <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">הזמנות מלאות</h2>
-                  <span className="text-xs bg-gray-100 text-gray-500 font-semibold px-2 py-0.5 rounded-full">{fullOrders.length}</span>
+                  <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">נסגרה קבלת מועמדויות</h2>
+                  <span className="text-xs bg-gray-100 text-gray-500 font-semibold px-2 py-0.5 rounded-full">{closedOrders.length}</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-50">
-                  {fullOrders.map(order => (
+                  {closedOrders.map(order => (
                     <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
                   ))}
                 </div>

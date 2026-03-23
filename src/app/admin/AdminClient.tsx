@@ -44,6 +44,7 @@ interface AdminClientProps {
 function StatusBadge({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
     "בתהליך שיבוץ": "bg-blue-100 text-blue-700 border-blue-200",
+    "סגירת קבלת מועמדויות": "bg-orange-100 text-orange-700 border-orange-200",
     "הסתיים השיבוץ": "bg-green-100 text-green-700 border-green-200",
     "בוטל": "bg-red-100 text-red-700 border-red-200",
   };
@@ -64,7 +65,7 @@ function OrderAccordion({
   onConfirm,
 }: {
   order: AdminOrder;
-  onConfirm: (subitemId: string, action: "confirm" | "reject") => Promise<void>;
+  onConfirm: (orderId: string, subitemId: string, action: "confirm" | "reject") => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -164,7 +165,7 @@ function OrderAccordion({
 
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
             <span className="text-xs text-gray-500 flex items-center gap-1">
-              {order.subitems.length} נרשמים
+              {order.subitems.length} מועמדים
             </span>
             <svg
               className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
@@ -191,7 +192,7 @@ function OrderAccordion({
           <RegistrantsList
             orderId={order.id}
             registrants={registrants}
-            onConfirm={onConfirm}
+            onConfirm={(subitemId, action) => onConfirm(order.id, subitemId, action)}
           />
         </div>
       )}
@@ -253,13 +254,14 @@ export default function AdminClient({ user }: AdminClientProps) {
   }, [fetchOrders]);
 
   async function handleConfirm(
+    orderId: string,
     subitemId: string,
     action: "confirm" | "reject"
   ) {
     const res = await fetch("/api/admin/confirm", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subitemId, action }),
+      body: JSON.stringify({ orderId, subitemId, action }),
     });
 
     const data = await res.json();
@@ -268,19 +270,26 @@ export default function AdminClient({ user }: AdminClientProps) {
       throw new Error(data.error || "שגיאה בעדכון הסטטוס");
     }
 
-    // Update local state
+    // Update local state — subitem status + order status if threshold reached
     setOrders((prev) =>
-      prev.map((order) => ({
-        ...order,
-        subitems: order.subitems.map((sub) =>
+      prev.map((order) => {
+        if (order.id !== orderId) return order;
+        const updatedSubitems = order.subitems.map((sub) =>
           sub.id === subitemId
-            ? {
-                ...sub,
-                attendanceStatus: action === "confirm" ? "מאושר" : "נדחה",
-              }
+            ? { ...sub, attendanceStatus: action === "confirm" ? "מאושר" : "נדחה" }
             : sub
-        ),
-      }))
+        );
+        const confirmedCount = updatedSubitems.filter(
+          (s) => s.attendanceStatus === "מאושר"
+        ).length;
+        let newStatus = order.status;
+        if (action === "confirm" && order.requiredCount > 0 && confirmedCount >= order.requiredCount) {
+          newStatus = "הסתיים השיבוץ";
+        } else if (action === "reject" && order.status === "הסתיים השיבוץ") {
+          newStatus = "סגירת קבלת מועמדויות";
+        }
+        return { ...order, subitems: updatedSubitems, status: newStatus };
+      })
     );
   }
 
@@ -310,7 +319,7 @@ export default function AdminClient({ user }: AdminClientProps) {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">ניהול הזמנות</h1>
               <p className="text-sm text-gray-500 mt-1">
-                ניהול כל ההזמנות ואישור נרשמים
+                ניהול כל ההזמנות ואישור מועמדים
               </p>
             </div>
             <button
@@ -351,7 +360,8 @@ export default function AdminClient({ user }: AdminClientProps) {
               <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-xl px-4 py-2 text-sm">
                 <span className="w-2 h-2 rounded-full bg-purple-400" />
                 <span className="text-purple-700 font-medium">{totalRegistrants}</span>
-                <span className="text-purple-600">נרשמים</span>
+
+                <span className="text-purple-600">מועמדים</span>
               </div>
             </div>
           )}

@@ -7,6 +7,7 @@ export interface Order {
   name: string;
   date: string;
   location: string;
+  orderLocation: string;
   status: string;
   requiredCount: number;
   assignedCount: number;
@@ -31,23 +32,25 @@ function formatDate(dateStr: string): string {
 
 function SpotsBar({ required, assigned }: { required: number; assigned: number }) {
   if (required <= 0) return null;
-  const percent = Math.min(100, (assigned / required) * 100);
-  const remaining = required - assigned;
-  const isFull = remaining <= 0;
-  const isAlmostFull = !isFull && percent >= 75;
+  const capacityLimit = Math.ceil(required * 1.5);
+  const remaining = capacityLimit - assigned;
+  const isClosed = remaining <= 0;
+  const isOverRequired = !isClosed && assigned >= required;
+  const isAlmostFull = !isClosed && !isOverRequired && (assigned / capacityLimit) >= 0.75;
+  const percent = Math.min(100, (assigned / capacityLimit) * 100);
 
   return (
     <div className="mt-3">
       <div className="flex justify-between text-xs mb-1.5">
-        <span className="text-gray-500">{assigned} / {required} אמנים</span>
-        <span className={`font-medium ${isFull ? "text-red-500" : isAlmostFull ? "text-orange-500" : "text-gray-500"}`}>
-          {isFull ? "מלא" : `עוד ${remaining} מקומות`}
+        <span className="text-gray-500">{assigned} מועמדים / {required} נדרשים</span>
+        <span className={`font-medium ${isClosed ? "text-red-500" : isOverRequired ? "text-orange-500" : isAlmostFull ? "text-orange-400" : "text-gray-500"}`}>
+          {isClosed ? "נסגרה קבלת מועמדויות" : `עוד ${remaining} מקומות`}
         </span>
       </div>
       <div className="w-full bg-gray-100 rounded-full h-1.5">
         <div
           className={`h-1.5 rounded-full transition-all duration-300 ${
-            isFull ? "bg-red-400" : isAlmostFull ? "bg-orange-400" : "bg-blue-400"
+            isClosed ? "bg-red-400" : isOverRequired ? "bg-orange-400" : isAlmostFull ? "bg-orange-300" : "bg-blue-400"
           }`}
           style={{ width: `${percent}%` }}
         />
@@ -75,7 +78,7 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isFull = order.requiredCount > 0 && order.spotsRemaining <= 0;
+  const isClosed = order.requiredCount > 0 && order.spotsRemaining <= 0;
   const isPast = order.date ? new Date(order.date) < new Date(new Date().toDateString()) : false;
 
   async function handleClick() {
@@ -99,7 +102,7 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
       order.isRegistered ? "border-blue-200" : "border-gray-100"
     }`}>
       {/* Top accent */}
-      <div className={`h-1 ${order.isRegistered ? "bg-blue-500" : isFull ? "bg-gray-300" : "bg-emerald-400"}`} />
+      <div className={`h-1 ${order.isRegistered ? "bg-blue-500" : isClosed ? "bg-gray-300" : "bg-emerald-400"}`} />
 
       <div className="p-5">
         {/* Header */}
@@ -112,7 +115,7 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
               </svg>
-              רשום
+              מועמד
             </span>
           )}
         </div>
@@ -166,12 +169,12 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-                הסר רישום
+                בטל מועמדות
               </>}
             </button>
-          ) : isFull ? (
+          ) : isClosed ? (
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 text-center">
-              ההזמנה מלאה
+              נסגרה קבלת מועמדויות
             </div>
           ) : (
             <button
@@ -179,11 +182,11 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
               disabled={loading}
               className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-blue-200"
             >
-              {loading ? <><Spinner />רושם...</> : <>
+              {loading ? <><Spinner />שולח...</> : <>
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                הירשם
+                הגש מועמדות
               </>}
             </button>
           )}

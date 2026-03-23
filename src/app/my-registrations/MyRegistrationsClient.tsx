@@ -115,7 +115,7 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
   useEffect(() => { fetchRegistrations(); }, [fetchRegistrations]);
 
   const handleUnregister = useCallback(async (reg: Registration) => {
-    if (!confirm(`להסיר את ההרשמה להזמנה "${reg.orderName}"?`)) return;
+    if (!confirm(`לבטל את המועמדות להזמנה "${reg.orderName}"?`)) return;
     setUnregisteringId(reg.subitemId);
     setError(null);
     try {
@@ -126,7 +126,7 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "שגיאה בביטול הרישום");
+        setError(data.error || "שגיאה בביטול המועמדות");
         return;
       }
       await fetchRegistrations();
@@ -194,8 +194,8 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
         <div className="mb-8">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">ההזמנות שלי</h1>
-              <p className="text-sm text-gray-500 mt-1">כל ההזמנות שנרשמת אליהן</p>
+              <h1 className="text-2xl font-bold text-gray-900">המועמדויות שלי</h1>
+              <p className="text-sm text-gray-500 mt-1">כל ההזמנות שהגשת אליהן מועמדות</p>
             </div>
             <button
               onClick={fetchRegistrations}
@@ -216,7 +216,7 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
               <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm">
                 <span className="w-2 h-2 rounded-full bg-blue-400" />
                 <span className="text-gray-700 font-medium">{registrations.length}</span>
-                <span className="text-gray-500">רישומים</span>
+                <span className="text-gray-500">מועמדויות</span>
               </div>
               {confirmedCount > 0 && (
                 <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2 text-sm">
@@ -301,8 +301,8 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
                   d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-gray-600 mb-1">אין רישומים עדיין</h3>
-            <p className="text-sm text-gray-400 mb-5">עבור להזמנות פתוחות כדי להירשם לאירועים</p>
+            <h3 className="text-lg font-semibold text-gray-600 mb-1">אין מועמדויות עדיין</h3>
+            <p className="text-sm text-gray-400 mb-5">עבור להזמנות פתוחות כדי להגיש מועמדות</p>
             <Link
               href="/orders"
               className="inline-flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-5 py-2.5 rounded-xl transition-colors"
@@ -316,7 +316,7 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-gray-500 mb-3">
-              {selectedMonth === "all" ? "אין רישומים" : "אין רישומים בחודש זה"}
+              {selectedMonth === "all" ? "אין מועמדויות" : "אין מועמדויות בחודש זה"}
             </p>
             {selectedMonth !== "all" && (
               <button onClick={() => setSelectedMonth("all")} className="text-sm text-blue-500 hover:underline">
@@ -385,7 +385,7 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
                               disabled={unregisteringId === reg.subitemId}
                               className="btn-danger text-xs py-2 px-3 rounded-lg"
                             >
-                              {unregisteringId === reg.subitemId ? "..." : "הסר הרשמה"}
+                              {unregisteringId === reg.subitemId ? "..." : "בטל מועמדות"}
                             </button>
                           )}
                         </div>
