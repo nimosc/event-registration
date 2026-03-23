@@ -267,6 +267,24 @@ export async function createSubitem(
   `;
 
   await mondayQuery(updateQuery);
+
+  // Step 3: Set registration date
+  const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
+  const dateValue = JSON.stringify(JSON.stringify({ date: today }));
+  const dateQuery = `
+    mutation {
+      change_column_value(
+        board_id: ${BOARDS.SUBITEMS},
+        item_id: ${subitemId},
+        column_id: "date0",
+        value: ${dateValue}
+      ) {
+        id
+      }
+    }
+  `;
+
+  await mondayQuery(dateQuery);
   return { id: subitemId };
 }
 
@@ -313,8 +331,6 @@ export async function updateOrderStatus(
   orderId: string,
   label: string
 ): Promise<void> {
-  const value = JSON.stringify({ label });
-
   const query = `
     mutation {
       change_column_value(
