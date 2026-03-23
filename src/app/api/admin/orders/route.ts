@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
-import { getAllOrders, getColumnValue, parseColorLabel, parseLinkedItemIds } from "@/lib/monday";
+import {
+  getAllOrders,
+  getColumnValue,
+  parseColorLabel,
+  parseLinkedItemIds,
+  mapMondayAttendanceToInternal,
+  mapMondayCandidacyToInternal,
+  CANDIDACY_STATUS_COLUMN_ID,
+} from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
 export async function GET() {
@@ -35,13 +43,17 @@ export async function GET() {
         const attendanceCol = sub.column_values.find(
           (cv) => cv.id === "color_mm18bjdk"
         );
+        const candidacyCol = sub.column_values.find(
+          (cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID
+        );
 
         return {
           id: sub.id,
           name: sub.name,
           linkedArtistIds: parseLinkedItemIds(relationCol?.value),
           role: roleCol?.text || "",
-          attendanceStatus: attendanceCol?.text || "",
+          attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
+          candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
         };
       });
 

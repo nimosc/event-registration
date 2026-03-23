@@ -90,6 +90,8 @@ export default function OrdersClient({ user }: OrdersClientProps) {
   const [locationInitialized, setLocationInitialized] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(Date.now());
   const [showLocationModal, setShowLocationModal] = useState(!user.location);
+  const [artistLocationOptions, setArtistLocationOptions] = useState<string[]>([]);
+  const [artistLocationOptionsLoading, setArtistLocationOptionsLoading] = useState(false);
   const [locationInput, setLocationInput] = useState("");
   const [locationSaving, setLocationSaving] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -113,6 +115,31 @@ export default function OrdersClient({ user }: OrdersClientProps) {
   }, []);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders, lastRefresh]);
+
+  useEffect(() => {
+    if (!showLocationModal) return;
+    if (artistLocationOptions.length > 0) return;
+
+    let cancelled = false;
+    async function loadOptions() {
+      setArtistLocationOptionsLoading(true);
+      try {
+        const res = await fetch("/api/profile/location/options");
+        const data = await res.json();
+        if (!res.ok) return;
+        if (!cancelled) setArtistLocationOptions(Array.isArray(data.options) ? data.options : []);
+      } catch {
+        // ignore (we fall back to input)
+      } finally {
+        if (!cancelled) setArtistLocationOptionsLoading(false);
+      }
+    }
+
+    loadOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, [showLocationModal, artistLocationOptions.length]);
 
   // Initialize location filter based on artist's location
   useEffect(() => {
@@ -243,9 +270,15 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               </p>
             </div>
 
-            {availableLocations.length > 0 ? (
+            {artistLocationOptionsLoading ? (
               <div className="grid grid-cols-2 gap-2 mb-4">
-                {availableLocations.map(loc => (
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-11 bg-gray-100 rounded-xl animate-pulse border border-gray-50" />
+                ))}
+              </div>
+            ) : artistLocationOptions.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {artistLocationOptions.map((loc) => (
                   <button
                     key={loc}
                     onClick={() => setLocationInput(loc)}
@@ -263,7 +296,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               <input
                 type="text"
                 value={locationInput}
-                onChange={e => setLocationInput(e.target.value)}
+                onChange={(e) => setLocationInput(e.target.value)}
                 placeholder="הכנס שם אזור..."
                 className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />

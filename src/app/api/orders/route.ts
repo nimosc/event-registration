@@ -6,6 +6,8 @@ import {
   ORDER_LOCATION_COLUMN_ID,
   STATUS_OPEN,
   STATUS_CANDIDACY_CLOSED,
+  parseDropdownLabel,
+  mapMondayAttendanceToInternal,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
@@ -72,7 +74,7 @@ export async function GET() {
             id: sub.id,
             name: sub.name,
             linkedArtistIds: parseLinkedItemIds(relationCol?.value),
-            attendanceStatus: attendanceCol?.text || "",
+            attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
           };
         });
 
@@ -81,12 +83,15 @@ export async function GET() {
           sub.name.trim() === session.name.trim()
         );
 
+        const orderLocation =
+          orderLocationCol?.text?.trim() || parseDropdownLabel(orderLocationCol?.value)?.trim() || "";
+
         return {
           id: item.id,
           name: item.name,
           date: dateCol?.text || "",
           location: locationCol?.text || "",
-          orderLocation: orderLocationCol?.text || "",
+          orderLocation,
           status,
           requiredCount,
           assignedCount,

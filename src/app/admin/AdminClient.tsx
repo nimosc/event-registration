@@ -34,6 +34,7 @@ interface AdminOrder {
     linkedArtistIds: number[];
     role: string;
     attendanceStatus: string;
+    candidacyStatus?: string;
   }[];
 }
 
@@ -63,9 +64,16 @@ function StatusBadge({ status }: { status: string }) {
 function OrderAccordion({
   order,
   onConfirm,
+  statusMode,
 }: {
   order: AdminOrder;
-  onConfirm: (orderId: string, subitemId: string, action: "confirm" | "reject") => Promise<void>;
+  statusMode: "candidacy" | "arrival";
+  onConfirm: (
+    orderId: string,
+    subitemId: string,
+    action: "confirm" | "reject",
+    mode: "candidacy" | "arrival"
+  ) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -74,6 +82,7 @@ function OrderAccordion({
     name: sub.name,
     role: sub.role,
     attendanceStatus: sub.attendanceStatus,
+    candidacyStatus: sub.candidacyStatus,
   }));
 
   const filledPercent =
@@ -81,13 +90,17 @@ function OrderAccordion({
       ? Math.min(100, (order.assignedCount / order.requiredCount) * 100)
       : 0;
 
-  const confirmedCount = order.subitems.filter(
-    (s) => s.attendanceStatus === "מאושר"
-  ).length;
+  const confirmedCount =
+    statusMode === "arrival"
+      ? order.subitems.filter((s) => s.attendanceStatus === "מאושר").length
+      : order.subitems.filter((s) => (s.candidacyStatus ?? "") === "מאושר").length;
 
-  const pendingCount = order.subitems.filter(
-    (s) => s.attendanceStatus !== "מאושר" && s.attendanceStatus !== "נדחה"
-  ).length;
+  const pendingCount =
+    statusMode === "arrival"
+      ? order.subitems.filter((s) => s.attendanceStatus !== "מאושר" && s.attendanceStatus !== "נדחה").length
+      : order.subitems.filter(
+          (s) => (s.candidacyStatus ?? "") !== "מאושר" && (s.candidacyStatus ?? "") !== "נדחה"
+        ).length;
 
   return (
     <div className={`bg-white rounded-xl overflow-hidden transition-colors ${
@@ -206,7 +219,8 @@ function OrderAccordion({
           <RegistrantsList
             orderId={order.id}
             registrants={registrants}
-            onConfirm={(subitemId, action) => onConfirm(order.id, subitemId, action)}
+            statusMode={statusMode}
+            onConfirm={(subitemId, action) => onConfirm(order.id, subitemId, action, statusMode)}
           />
         </div>
       )}
@@ -250,8 +264,14 @@ function isUpcoming(dateStr: string, days = 14): boolean {
   return eventDate >= now && eventDate <= cutoff;
 }
 
-function hasPendingConfirmation(order: AdminOrder): boolean {
-  return order.subitems.some(s => s.attendanceStatus !== "מאושר" && s.attendanceStatus !== "נדחה");
+function hasPendingConfirmation(
+  order: AdminOrder,
+  mode: "candidacy" | "arrival"
+): boolean {
+  return order.subitems.some((s) => {
+    const cur = mode === "arrival" ? s.attendanceStatus : s.candidacyStatus ?? "";
+    return cur !== "מאושר" && cur !== "נדחה";
+  });
 }
 
 export default function AdminClient({ user }: AdminClientProps) {
@@ -260,6 +280,7 @@ export default function AdminClient({ user }: AdminClientProps) {
   const [error, setError] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<FilterMode>("relevant");
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusMode, setStatusMode] = useState<"candidacy" | "arrival">("candidacy");
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -288,12 +309,13 @@ export default function AdminClient({ user }: AdminClientProps) {
   async function handleConfirm(
     orderId: string,
     subitemId: string,
-    action: "confirm" | "reject"
+    action: "confirm" | "reject",
+    mode: "candidacy" | "arrival"
   ) {
     const res = await fetch("/api/admin/confirm", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderId, subitemId, action }),
+      body: JSON.stringify({ orderId, subitemId, action, mode }),
     });
 
     const data = await res.json();
@@ -308,16 +330,29 @@ export default function AdminClient({ user }: AdminClientProps) {
         if (order.id !== orderId) return order;
         const updatedSubitems = order.subitems.map((sub) =>
           sub.id === subitemId
-            ? { ...sub, attendanceStatus: action === "confirm" ? "מאושר" : "נדחה" }
+            ? {
+                ...sub,
+                attendanceStatus:
+                  mode === "arrival" ? (action === "confirm" ? "מאושר" : "נדחה") : sub.attendanceStatus,
+                candidacyStatus:
+                  mode === "candidacy" ? (action === "confirm" ? "מאושר" : "נדחה") : sub.candidacyStatus,
+              }
             : sub
         );
-        const confirmedCount = updatedSubitems.filter(
-          (s) => s.attendanceStatus === "מאושר"
-        ).length;
+        const confirmedCount =
+          mode === "arrival"
+            ? updatedSubitems.filter((s) => s.attendanceStatus === "מאושר").length
+            : updatedSubitems.filter((s) => (s.candidacyStatus ?? "") === "מאושר").length;
         let newStatus = order.status;
-        if (action === "confirm" && order.requiredCount > 0 && confirmedCount >= order.requiredCount) {
+        // Order status changes only after "אישור מועמדות".
+        if (
+          mode === "candidacy" &&
+          action === "confirm" &&
+          order.requiredCount > 0 &&
+          confirmedCount >= order.requiredCount
+        ) {
           newStatus = "הסתיים השיבוץ";
-        } else if (action === "reject" && order.status === "הסתיים השיבוץ") {
+        } else if (mode === "candidacy" && action === "reject" && order.status === "הסתיים השיבוץ") {
           newStatus = "סגירת קבלת מועמדויות";
         }
         return { ...order, subitems: updatedSubitems, status: newStatus };
@@ -334,17 +369,19 @@ export default function AdminClient({ user }: AdminClientProps) {
     if (!matchesSearch) return false;
 
     if (filterMode === "relevant") {
-      return hasPendingConfirmation(order) || isUpcoming(order.date);
+      return hasPendingConfirmation(order, statusMode) || isUpcoming(order.date);
     }
     if (filterMode === "needs_confirmation") {
-      return hasPendingConfirmation(order);
+      return hasPendingConfirmation(order, statusMode);
     }
     return true; // "all"
   });
 
-  const pendingCount = orders.filter(hasPendingConfirmation).length;
+  const pendingCount = orders.filter((o) => hasPendingConfirmation(o, statusMode)).length;
   const upcomingCount = orders.filter(o => isUpcoming(o.date)).length;
-  const relevantCount = orders.filter(o => hasPendingConfirmation(o) || isUpcoming(o.date)).length;
+  const relevantCount = orders.filter(
+    (o) => hasPendingConfirmation(o, statusMode) || isUpcoming(o.date)
+  ).length;
   const totalRegistrants = orders.reduce((sum, o) => sum + o.subitems.length, 0);
 
   return (
@@ -413,6 +450,32 @@ export default function AdminClient({ user }: AdminClientProps) {
             </div>
           )}
         </div>
+
+        {/* Confirm Tabs */}
+        {!loading && orders.length > 0 && (
+          <div className="mb-5 flex gap-2 flex-wrap">
+            <button
+              onClick={() => setStatusMode("candidacy")}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                statusMode === "candidacy"
+                  ? "bg-gray-900 text-white border-gray-900 shadow-sm"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              אישור מועמדות
+            </button>
+            <button
+              onClick={() => setStatusMode("arrival")}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                statusMode === "arrival"
+                  ? "bg-gray-900 text-white border-gray-900 shadow-sm"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              אישור הגעה
+            </button>
+          </div>
+        )}
 
         {/* Filters */}
         {!loading && orders.length > 0 && (
@@ -526,6 +589,7 @@ export default function AdminClient({ user }: AdminClientProps) {
                 key={order.id}
                 order={order}
                 onConfirm={handleConfirm}
+                statusMode={statusMode}
               />
             ))}
           </div>

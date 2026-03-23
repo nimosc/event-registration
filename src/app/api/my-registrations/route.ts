@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllOrders, getColumnValue, getArtistTaxStatus, parseLinkedItemIds } from "@/lib/monday";
+import { getAllOrders, getColumnValue, getArtistTaxStatus, parseLinkedItemIds, mapMondayAttendanceToInternal } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
 export async function GET() {
@@ -54,7 +54,7 @@ export async function GET() {
             location: locationCol?.text || "",
             orderStatus: statusCol?.text || "",
             subitemId: sub.id,
-            attendanceStatus: attendanceCol?.text || "",
+            attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
             role: roleCol?.text || "",
           });
         }

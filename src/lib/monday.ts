@@ -116,6 +116,244 @@ export function parseColorLabel(value: string | null | undefined): string {
   }
 }
 
+/**
+ * Monday dropdown values often come back as JSON in `value` (while `text` can be empty).
+ * We try a few common shapes and return the first label we can find.
+ */
+export function parseDropdownLabel(value: string | null | undefined): string {
+  if (!value) return "";
+  try {
+    let parsed: any = JSON.parse(value);
+    // Some columns are double-stringified on the way in (we do that in updateArtistLocation).
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+
+    if (parsed?.labels && Array.isArray(parsed.labels) && parsed.labels[0]) {
+      return String(parsed.labels[0]);
+    }
+
+    const chosen = parsed?.chosenValues ?? parsed?.chosen_values;
+    if (Array.isArray(chosen) && chosen.length > 0) {
+      const first = chosen[0];
+      if (first?.name) return String(first.name);
+      if (first?.label) return String(first.label);
+    }
+
+    if (typeof parsed?.label === "string") return parsed.label;
+  } catch {
+    // ignore
+  }
+
+  return "";
+}
+
+// Monday attendance column values (observed from board) are:
+//   "הגיע" / "לא הגיע"
+// The UI in this app uses:
+//   "מאושר" / "נדחה"
+export function mapMondayAttendanceToInternal(
+  value: string | null | undefined
+): string {
+  const t = (value ?? "").trim();
+  if (!t) return "";
+  if (t === "הגיע") return "מאושר";
+  if (t === "לא הגיע") return "נדחה";
+  return t; // passthrough for already-normalized values
+}
+
+export function mapInternalAttendanceToMonday(value: string): string {
+  if (!value) return "";
+  if (value === "מאושר") return "הגיע";
+  if (value === "נדחה") return "לא הגיע";
+  return value;
+}
+
+// Monday candidacy status column (admin "אישור מועמדות")
+// Observed labels:
+//   "מועמדות אושרה" / "מועמדות נדחתה"
+export const CANDIDACY_STATUS_COLUMN_ID = "color_mm1q61p2";
+
+export function mapMondayCandidacyToInternal(
+  value: string | null | undefined
+): string {
+  const t = (value ?? "").trim();
+  if (!t) return "";
+  if (t === "מועמדות אושרה") return "מאושר";
+  if (t === "מועמדות נדחתה") return "נדחה";
+  return t; // passthrough for already-normalized values
+}
+
+export function mapInternalCandidacyToMonday(value: string): string {
+  if (!value) return "";
+  if (value === "מאושר") return "מועמדות אושרה";
+  if (value === "נדחה") return "מועמדות נדחתה";
+  return value;
+}
+
+function parseMaybeJsonDouble(input: string): unknown | null {
+  try {
+    const first = JSON.parse(input);
+    if (typeof first === "string") return JSON.parse(first);
+    return first;
+  } catch {
+    return null;
+  }
+}
+
+function collectStringsByKeys(obj: unknown, keys: Set<string>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const visit = (v: unknown) => {
+    if (!v) return;
+    if (typeof v === "string") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if (typeof v === "object") {
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        if (keys.has(k) && typeof val === "string" && val.trim()) {
+          if (!seen.has(val)) {
+            seen.add(val);
+            out.push(val);
+          }
+        } else {
+          visit(val);
+        }
+      }
+    }
+  };
+
+  visit(obj);
+  return out;
+}
+
+async function getDropdownOptionsInternal(boardId: number, columnId: string): Promise<string[]> {
+  // Primary: use `settings_str` (contains all dropdown options).
+  try {
+    const query = `
+      query {
+        boards(ids: [${boardId}]) {
+          columns {
+            id
+            settings_str
+          }
+        }
+      }
+    `;
+
+    const data = await mondayQuery<{
+      boards: { columns: { id: string; settings_str: string | null }[] }[];
+    }>(query);
+
+    const col = data.boards?.[0]?.columns?.find((c) => c.id === columnId);
+    const settingsStr = col?.settings_str;
+    if (settingsStr) {
+      const settings = parseMaybeJsonDouble(settingsStr);
+      if (settings && typeof settings === "object") {
+        const settingsAny = settings as any;
+
+        const normalizeEntry = (entry: unknown): string | null => {
+          if (!entry) return null;
+          if (typeof entry === "string") return entry.trim() || null;
+          if (typeof entry === "object") {
+            const maybeObj = entry as Record<string, unknown>;
+            const v = (maybeObj.label ?? maybeObj.name ?? maybeObj.value ?? maybeObj.text) as unknown;
+            if (typeof v === "string") return v.trim() || null;
+          }
+          return null;
+        };
+
+        const candidates: string[] = [];
+
+        const directOptions = settingsAny.options;
+        if (Array.isArray(directOptions) && directOptions.length > 0) {
+          for (const o of directOptions) {
+            const v = normalizeEntry(o);
+            if (v) candidates.push(v);
+          }
+        }
+
+        const directLabels = settingsAny.labels;
+        if (Array.isArray(directLabels) && directLabels.length > 0) {
+          for (const l of directLabels) {
+            const v = normalizeEntry(l);
+            if (v) candidates.push(v);
+          }
+        } else if (directLabels && typeof directLabels === "object") {
+          for (const v of Object.values(directLabels)) {
+            if (Array.isArray(v)) {
+              for (const l of v) {
+                const norm = normalizeEntry(l);
+                if (norm) candidates.push(norm);
+              }
+            } else {
+              const norm = normalizeEntry(v);
+              if (norm) candidates.push(norm);
+            }
+          }
+        }
+
+        if (candidates.length === 0) {
+          candidates.push(
+            ...collectStringsByKeys(settings, new Set(["label", "name", "value", "text"]))
+          );
+        }
+
+        const deduped = Array.from(new Set(candidates.map((s) => s.trim()).filter(Boolean)));
+        const hebrewOnly = deduped.filter((s) => /[\u0590-\u05FF]/.test(s));
+        const result = (hebrewOnly.length > 0 ? hebrewOnly : deduped).sort((a, b) => a.localeCompare(b, "he"));
+        if (result.length > 0) return result;
+      }
+    }
+  } catch {
+    // ignore and fall back
+  }
+
+  // Fallback: read actual column values from items we see.
+  const fallbackQuery = `
+    query {
+      boards(ids: [${boardId}]) {
+        items_page(limit: 500) {
+          items {
+            column_values(ids: ["${columnId}"]) {
+              text
+              value
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const fallbackData = await mondayQuery<{
+    boards: {
+      items_page: {
+        items: {
+          column_values: { text: string; value: string | null }[];
+        }[];
+      };
+    }[];
+  }>(fallbackQuery);
+
+  const items = fallbackData.boards?.[0]?.items_page?.items ?? [];
+  const labels = new Set<string>();
+
+  for (const item of items) {
+    const cv = item.column_values?.[0];
+    const label = cv?.text?.trim() || parseDropdownLabel(cv?.value)?.trim() || "";
+    if (label) labels.add(label);
+  }
+
+  const result = Array.from(labels).map((s) => s.trim()).filter(Boolean);
+  result.sort((a, b) => a.localeCompare(b, "he"));
+  return result;
+}
+
+export async function getArtistLocationOptions(): Promise<string[]> {
+  return getDropdownOptionsInternal(BOARDS.ARTISTS, ARTIST_LOCATION_COLUMN_ID);
+}
+
 export function parseLinkedItemIds(value: string | null | undefined): number[] {
   if (!value) return [];
   try {
@@ -244,7 +482,7 @@ export async function getAllOrders() {
             subitems {
               id
               name
-              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk"]) {
+              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}"]) {
                 id
                 text
                 value
@@ -413,7 +651,7 @@ export async function getOrderById(orderId: string) {
         }
         subitems {
           id
-          column_values(ids: ["color_mm18bjdk"]) {
+          column_values(ids: ["color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}"]) {
             id
             text
           }
@@ -431,13 +669,36 @@ export async function updateAttendanceConfirmation(
   subitemId: string,
   label: string
 ): Promise<void> {
+  const mondayLabel = mapInternalAttendanceToMonday(label);
   const query = `
     mutation {
       change_column_value(
         board_id: ${BOARDS.SUBITEMS},
         item_id: ${subitemId},
         column_id: "color_mm18bjdk",
-        value: ${JSON.stringify(JSON.stringify({ label }))}
+        value: ${JSON.stringify(JSON.stringify({ label: mondayLabel }))}
+      ) {
+        id
+      }
+    }
+  `;
+
+  await mondayQuery(query);
+}
+
+// ─── Mutation: Update candidacy confirmation ────────────────────────────────
+export async function updateCandidacyConfirmation(
+  subitemId: string,
+  label: string
+): Promise<void> {
+  const mondayLabel = mapInternalCandidacyToMonday(label);
+  const query = `
+    mutation {
+      change_column_value(
+        board_id: ${BOARDS.SUBITEMS},
+        item_id: ${subitemId},
+        column_id: "${CANDIDACY_STATUS_COLUMN_ID}",
+        value: ${JSON.stringify(JSON.stringify({ label: mondayLabel }))}
       ) {
         id
       }

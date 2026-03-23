@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export interface Registrant {
   id: string;
   name: string;
   role: string;
   attendanceStatus: string;
+  candidacyStatus?: string;
 }
+
+type StatusMode = "candidacy" | "arrival";
 
 interface RegistrantsListProps {
   orderId: string;
   registrants: Registrant[];
+  statusMode: StatusMode;
   onConfirm: (subitemId: string, action: "confirm" | "reject") => Promise<void>;
 }
 
@@ -45,11 +49,22 @@ function AttendanceBadge({ status }: { status: string }) {
 interface RegistrantRowProps {
   registrant: Registrant;
   onAction: (action: "confirm" | "reject") => Promise<void>;
+  statusMode: StatusMode;
 }
 
-function RegistrantRow({ registrant, onAction }: RegistrantRowProps) {
+function RegistrantRow({ registrant, onAction, statusMode }: RegistrantRowProps) {
   const [loading, setLoading] = useState<"confirm" | "reject" | null>(null);
-  const [currentStatus, setCurrentStatus] = useState(registrant.attendanceStatus);
+  const getCurrentValue = () =>
+    statusMode === "candidacy" ? registrant.candidacyStatus ?? "" : registrant.attendanceStatus;
+  const [currentStatus, setCurrentStatus] = useState(getCurrentValue);
+
+  // If manager switches tabs, update badge to match the new meaning.
+  // (Keep optimistic updates when action is in progress.)
+  useEffect(() => {
+    if (loading) return;
+    setCurrentStatus(getCurrentValue());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusMode, registrant.attendanceStatus, registrant.candidacyStatus]);
 
   async function handleAction(action: "confirm" | "reject") {
     setLoading(action);
@@ -166,6 +181,7 @@ function RegistrantRow({ registrant, onAction }: RegistrantRowProps) {
 
 export default function RegistrantsList({
   registrants,
+  statusMode,
   onConfirm,
 }: RegistrantsListProps) {
   if (registrants.length === 0) {
@@ -183,6 +199,7 @@ export default function RegistrantsList({
           key={registrant.id}
           registrant={registrant}
           onAction={(action) => onConfirm(registrant.id, action)}
+          statusMode={statusMode}
         />
       ))}
     </div>

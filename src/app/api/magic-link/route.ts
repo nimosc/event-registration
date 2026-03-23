@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mondayQuery, BOARDS, ARTIST_LOCATION_COLUMN_ID } from "@/lib/monday";
+import { mondayQuery, BOARDS, ARTIST_LOCATION_COLUMN_ID, parseDropdownLabel } from "@/lib/monday";
 import { createSession, setSessionCookie, SessionUser } from "@/lib/auth";
 
 interface ArtistItem {
@@ -51,18 +51,9 @@ export async function GET(request: NextRequest) {
 
     const locationCol = artist.column_values.find((cv) => cv.id === ARTIST_LOCATION_COLUMN_ID);
 
-    // Parse dropdown: text may be empty, try to extract from value JSON
-    let location: string | undefined = locationCol?.text?.trim() || undefined;
-    if (!location && locationCol?.value) {
-      try {
-        const parsed = JSON.parse(locationCol.value);
-        const ids: number[] = parsed.ids ?? [];
-        // value JSON may contain chosenValues array
-        const chosen = parsed.chosenValues ?? parsed.chosen_values ?? [];
-        if (chosen.length > 0) location = chosen[0].name ?? chosen[0].label ?? undefined;
-        console.log(`[magic-link] dropdown parsed value:`, JSON.stringify(parsed));
-      } catch { /* ignore */ }
-    }
+    // Dropdown: Monday sometimes returns the label in `value` instead of `text`.
+    let location: string | undefined =
+      locationCol?.text?.trim() || parseDropdownLabel(locationCol?.value)?.trim() || undefined;
 
     console.log(`[magic-link] id=${id} artist="${artist.name}" LOCATION_COL_ID="${ARTIST_LOCATION_COLUMN_ID}"`);
     console.log(`[magic-link] column_values:`, JSON.stringify(artist.column_values));
