@@ -46,26 +46,51 @@ export async function mondayQuery<T>(
   }
 
   const body = variables ? { query, variables } : { query };
+  const queryPreview = query.trim().slice(0, 80).replace(/\s+/g, " ");
+  const start = Date.now();
+  console.log(`[Monday] → ${queryPreview}...`);
 
-  const response = await fetch(MONDAY_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: MONDAY_API_TOKEN.startsWith("Bearer ") ? MONDAY_API_TOKEN : `Bearer ${MONDAY_API_TOKEN}`,
-      "API-Version": "2024-01",
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  let response: Response;
+  try {
+    response = await fetch(MONDAY_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: MONDAY_API_TOKEN.startsWith("Bearer ") ? MONDAY_API_TOKEN : `Bearer ${MONDAY_API_TOKEN}`,
+        "API-Version": "2024-01",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeout);
+    const elapsed = Date.now() - start;
+    if ((err as Error).name === "AbortError") {
+      console.error(`[Monday] ✗ TIMEOUT after ${elapsed}ms — ${queryPreview}`);
+      throw new Error(`Monday.com API timeout after ${elapsed}ms`);
+    }
+    console.error(`[Monday] ✗ fetch error after ${elapsed}ms:`, err);
+    throw err;
+  }
+  clearTimeout(timeout);
+
+  const elapsed = Date.now() - start;
+  console.log(`[Monday] ← ${response.status} in ${elapsed}ms`);
 
   if (!response.ok) {
     const text = await response.text();
+    console.error(`[Monday] ✗ HTTP ${response.status}: ${text.slice(0, 200)}`);
     throw new Error(`Monday.com API error: ${response.status} - ${text}`);
   }
 
   const json = (await response.json()) as MondayResponse<T>;
 
   if (json.errors && json.errors.length > 0) {
+    console.error(`[Monday] ✗ GraphQL errors:`, json.errors);
     throw new Error(
       `Monday.com GraphQL error: ${json.errors.map((e) => e.message).join(", ")}`
     );
@@ -108,7 +133,7 @@ export function parseLinkedItemIds(value: string | null | undefined): number[] {
 
 // ─── Query: Get all artists (for login) ───────────────────────────────────────
 
-export const ARTIST_LOCATION_COLUMN_ID = "dropdown_mm1q49dy";
+export const ARTIST_LOCATION_COLUMN_ID = "dropdown_mm1qvq5q";
 export const ORDER_LOCATION_COLUMN_ID = "dropdown_mm1qvq5q";
 export const STATUS_OPEN = "בתהליך שיבוץ";
 export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
@@ -233,6 +258,28 @@ export async function getAllOrders() {
 
   const data = await mondayQuery<{ boards: MondayBoard[] }>(query);
   return data.boards[0]?.items_page?.items ?? [];
+}
+
+// ─── Mutation: Update artist location ────────────────────────────────────────
+
+export async function updateArtistLocation(
+  artistId: string,
+  location: string
+): Promise<void> {
+  const labelValue = JSON.stringify(JSON.stringify({ labels: [location] }));
+  const query = `
+    mutation {
+      change_column_value(
+        board_id: ${BOARDS.ARTISTS},
+        item_id: ${artistId},
+        column_id: "${ARTIST_LOCATION_COLUMN_ID}",
+        value: ${labelValue}
+      ) {
+        id
+      }
+    }
+  `;
+  await mondayQuery(query);
 }
 
 // ─── Mutation: Create subitem (register artist) ───────────────────────────────

@@ -22,6 +22,7 @@ export default function LoginClient({ magicId }: LoginClientProps) {
     fetch(`/api/magic-link?id=${encodeURIComponent(magicId)}`)
       .then((r) => r.json())
       .then((data) => {
+        console.log("[magic-link response]", JSON.stringify(data));
         if (data.success) {
           router.push(data.user?.role === "מנהל" ? "/admin" : "/orders");
           router.refresh();

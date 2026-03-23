@@ -32,13 +32,18 @@ export interface SubitemData {
 }
 
 export async function GET() {
+  const start = Date.now();
   try {
+    console.log("[/api/orders] GET start");
     const session = await getSession();
     if (!session) {
+      console.log("[/api/orders] no session → 401");
       return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
     }
+    console.log(`[/api/orders] session ok (${session.name}), fetching orders...`);
 
     const items = await getOpenOrders();
+    console.log(`[/api/orders] got ${items.length} items from Monday in ${Date.now() - start}ms`);
     const artistId = parseInt(session.id, 10);
 
     const orders: OrderData[] = items
@@ -96,9 +101,10 @@ export async function GET() {
         (order.status === STATUS_CANDIDACY_CLOSED && order.isRegistered)
       );
 
+    console.log(`[/api/orders] returning ${orders.length} orders (total ${Date.now() - start}ms)`);
     return NextResponse.json({ orders });
   } catch (error) {
-    console.error("Orders fetch error:", error);
+    console.error(`[/api/orders] error after ${Date.now() - start}ms:`, error);
     return NextResponse.json(
       { error: "שגיאה בטעינת הזמנות" },
       { status: 500 }

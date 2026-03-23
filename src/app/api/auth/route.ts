@@ -3,9 +3,11 @@ import { getAllArtists, getColumnValue, parseColorLabel, ARTIST_LOCATION_COLUMN_
 import { createSession, setSessionCookie, clearSessionCookie, SessionUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
+  const start = Date.now();
   try {
     const body = await request.json();
     const { username, password } = body as { username: string; password: string };
+    console.log(`[/api/auth] POST login attempt for username="${username}"`);
 
     if (!username || !password) {
       return NextResponse.json(
@@ -14,7 +16,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.log("[/api/auth] fetching all artists from Monday...");
     const artists = await getAllArtists();
+    console.log(`[/api/auth] got ${artists.length} artists in ${Date.now() - start}ms`);
 
     const artist = artists.find((item) => {
       const usernameCol = getColumnValue(item, "text_mm18xbdq");
@@ -26,6 +30,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (!artist) {
+      console.log("[/api/auth] ✗ artist not found → 401");
       return NextResponse.json(
         { error: "שם משתמש או סיסמה שגויים" },
         { status: 401 }
@@ -61,9 +66,10 @@ export async function POST(request: NextRequest) {
     const token = await createSession(user);
     await setSessionCookie(token);
 
+    console.log(`[/api/auth] ✓ login ok for "${artist.name}" (role: ${role}) in ${Date.now() - start}ms`);
     return NextResponse.json({ success: true, user });
   } catch (error) {
-    console.error("Auth error:", error);
+    console.error(`[/api/auth] error after ${Date.now() - start}ms:`, error);
     return NextResponse.json(
       { error: "שגיאה פנימית בשרת. אנא נסה שוב." },
       { status: 500 }

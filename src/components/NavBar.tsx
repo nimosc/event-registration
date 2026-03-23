@@ -8,9 +8,10 @@ import { useRouter, usePathname } from "next/navigation";
 interface NavBarProps {
   userName: string;
   userRole: "אומן" | "מנהל";
+  userLocation?: string;
 }
 
-export default function NavBar({ userName, userRole }: NavBarProps) {
+export default function NavBar({ userName, userRole, userLocation }: NavBarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -76,19 +77,31 @@ export default function NavBar({ userName, userRole }: NavBarProps) {
 
           {/* User Info & Logout */}
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex flex-col items-end">
+            <div className="hidden sm:flex flex-col items-end gap-0.5">
               <span className="text-sm font-medium text-gray-900">
                 {userName}
               </span>
-              <span
-                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                  userRole === "מנהל"
-                    ? "bg-purple-100 text-purple-700"
-                    : "bg-blue-100 text-blue-700"
-                }`}
-              >
-                {userRole}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                    userRole === "מנהל"
+                      ? "bg-purple-100 text-purple-700"
+                      : "bg-blue-100 text-blue-700"
+                  }`}
+                >
+                  {userRole}
+                </span>
+                {userLocation && userRole !== "מנהל" && (
+                  <span className="text-xs text-gray-400 flex items-center gap-0.5">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    {userLocation}
+                  </span>
+                )}
+              </div>
             </div>
 
             <button
@@ -159,6 +172,16 @@ export default function NavBar({ userName, userRole }: NavBarProps) {
               >
                 {userRole}
               </span>
+              {userLocation && userRole !== "מנהל" && (
+                <span className="text-xs text-gray-400 flex items-center gap-0.5">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  {userLocation}
+                </span>
+              )}
             </div>
 
             {navLinks.map((link) => (

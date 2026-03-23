@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import OrderCard, { Order } from "@/components/OrderCard";
 import { SessionUser } from "@/lib/auth";
@@ -79,6 +80,8 @@ function LoadingSkeleton() {
 }
 
 export default function OrdersClient({ user }: OrdersClientProps) {
+  console.log("[OrdersClient] user session:", JSON.stringify(user));
+  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +89,10 @@ export default function OrdersClient({ user }: OrdersClientProps) {
   const [selectedLocation, setSelectedLocation] = useState<string>("all");
   const [locationInitialized, setLocationInitialized] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(Date.now());
+  const [showLocationModal, setShowLocationModal] = useState(!user.location);
+  const [locationInput, setLocationInput] = useState("");
+  const [locationSaving, setLocationSaving] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -156,6 +163,27 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     return result.filter(o => parseMonthKey(o.date) === selectedMonth);
   }, [orders, selectedMonth, selectedLocation]);
 
+  async function handleSaveLocation() {
+    if (!locationInput.trim()) return;
+    setLocationSaving(true);
+    setLocationError(null);
+    try {
+      const res = await fetch("/api/profile/location", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: locationInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setLocationError(data.error || "שגיאה בשמירה"); return; }
+      setShowLocationModal(false);
+      router.refresh();
+    } catch {
+      setLocationError("שגיאת רשת. נסה שוב.");
+    } finally {
+      setLocationSaving(false);
+    }
+  }
+
   async function handleRegister(orderId: string) {
     const res = await fetch("/api/register", {
       method: "POST",
@@ -195,7 +223,74 @@ export default function OrdersClient({ user }: OrdersClientProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <NavBar userName={user.name} userRole={user.role} />
+      <NavBar userName={user.name} userRole={user.role} userLocation={user.location} />
+
+      {/* Location setup modal */}
+      {showLocationModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <svg className="w-6 h-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-bold text-gray-900">הגדר את האזור שלך</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                בחר את האזור הגיאוגרפי שלך כדי לראות הזמנות רלוונטיות
+              </p>
+            </div>
+
+            {availableLocations.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {availableLocations.map(loc => (
+                  <button
+                    key={loc}
+                    onClick={() => setLocationInput(loc)}
+                    className={`py-2.5 px-3 rounded-xl text-sm font-medium border transition-all ${
+                      locationInput === loc
+                        ? "bg-blue-500 text-white border-blue-500"
+                        : "bg-white text-gray-700 border-gray-200 hover:border-blue-300"
+                    }`}
+                  >
+                    {loc}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={locationInput}
+                onChange={e => setLocationInput(e.target.value)}
+                placeholder="הכנס שם אזור..."
+                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            )}
+
+            {locationError && (
+              <p className="text-sm text-red-500 mb-3 text-center">{locationError}</p>
+            )}
+
+            <button
+              onClick={handleSaveLocation}
+              disabled={!locationInput || locationSaving}
+              className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-xl text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {locationSaving ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  שומר...
+                </>
+              ) : "שמור ומשך"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
 

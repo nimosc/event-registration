@@ -6,7 +6,7 @@ interface ArtistItem {
   id: string;
   name: string;
   board: { id: string };
-  column_values: { id: string; text: string }[];
+  column_values: { id: string; text: string; value: string | null }[];
 }
 
 export async function GET(request: NextRequest) {
@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
           column_values(ids: ["color_mm18btbr", "color_mm18wjry", "${ARTIST_LOCATION_COLUMN_ID}"]) {
             id
             text
+            value
           }
         }
       }
@@ -49,13 +50,30 @@ export async function GET(request: NextRequest) {
     const role: SessionUser["role"] = roleCol?.text === "מנהל" ? "מנהל" : "אומן";
 
     const locationCol = artist.column_values.find((cv) => cv.id === ARTIST_LOCATION_COLUMN_ID);
-    const location = locationCol?.text?.trim() || undefined;
+
+    // Parse dropdown: text may be empty, try to extract from value JSON
+    let location: string | undefined = locationCol?.text?.trim() || undefined;
+    if (!location && locationCol?.value) {
+      try {
+        const parsed = JSON.parse(locationCol.value);
+        const ids: number[] = parsed.ids ?? [];
+        // value JSON may contain chosenValues array
+        const chosen = parsed.chosenValues ?? parsed.chosen_values ?? [];
+        if (chosen.length > 0) location = chosen[0].name ?? chosen[0].label ?? undefined;
+        console.log(`[magic-link] dropdown parsed value:`, JSON.stringify(parsed));
+      } catch { /* ignore */ }
+    }
+
+    console.log(`[magic-link] id=${id} artist="${artist.name}" LOCATION_COL_ID="${ARTIST_LOCATION_COLUMN_ID}"`);
+    console.log(`[magic-link] column_values:`, JSON.stringify(artist.column_values));
+    console.log(`[magic-link] locationCol:`, JSON.stringify(locationCol));
+    console.log(`[magic-link] resolved location="${location}"`);
 
     const user: SessionUser = { id: artist.id, name: artist.name, role, location };
     const token = await createSession(user);
     await setSessionCookie(token);
 
-    return NextResponse.json({ success: true, user });
+    return NextResponse.json({ success: true, user, _debug: { locationCol, location } });
   } catch (error) {
     console.error("Magic link error:", error);
     return NextResponse.json({ error: "שגיאה פנימית בשרת" }, { status: 500 });

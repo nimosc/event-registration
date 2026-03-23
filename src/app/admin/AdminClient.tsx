@@ -85,8 +85,16 @@ function OrderAccordion({
     (s) => s.attendanceStatus === "מאושר"
   ).length;
 
+  const pendingCount = order.subitems.filter(
+    (s) => s.attendanceStatus !== "מאושר" && s.attendanceStatus !== "נדחה"
+  ).length;
+
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:border-gray-300 transition-colors">
+    <div className={`bg-white rounded-xl overflow-hidden transition-colors ${
+      pendingCount > 0
+        ? "border border-orange-200 hover:border-orange-300"
+        : "border border-gray-200 hover:border-gray-300"
+    }`}>
       {/* Order header - clickable */}
       <button
         className="w-full text-right p-5 hover:bg-gray-50 transition-colors"
@@ -99,6 +107,12 @@ function OrderAccordion({
                 {order.name}
               </h3>
               <StatusBadge status={order.status} />
+              {pendingCount > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 border border-orange-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                  {pendingCount} ממתינים לאישור
+                </span>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 mb-3">
@@ -222,11 +236,29 @@ function LoadingSkeleton() {
   );
 }
 
+type FilterMode = "relevant" | "needs_confirmation" | "all";
+
+function isUpcoming(dateStr: string, days = 14): boolean {
+  if (!dateStr) return false;
+  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return false;
+  const eventDate = new Date(`${match[1]}-${match[2]}-${match[3]}`);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const cutoff = new Date(now);
+  cutoff.setDate(cutoff.getDate() + days);
+  return eventDate >= now && eventDate <= cutoff;
+}
+
+function hasPendingConfirmation(order: AdminOrder): boolean {
+  return order.subitems.some(s => s.attendanceStatus !== "מאושר" && s.attendanceStatus !== "נדחה");
+}
+
 export default function AdminClient({ user }: AdminClientProps) {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterMode, setFilterMode] = useState<FilterMode>("relevant");
   const [searchQuery, setSearchQuery] = useState("");
 
   const fetchOrders = useCallback(async () => {
@@ -295,18 +327,25 @@ export default function AdminClient({ user }: AdminClientProps) {
 
   // Filter and search
   const filteredOrders = orders.filter((order) => {
-    const matchesStatus =
-      filterStatus === "all" || order.status === filterStatus;
     const matchesSearch =
       !searchQuery ||
       order.name.includes(searchQuery) ||
       order.location.includes(searchQuery);
-    return matchesStatus && matchesSearch;
+    if (!matchesSearch) return false;
+
+    if (filterMode === "relevant") {
+      return hasPendingConfirmation(order) || isUpcoming(order.date);
+    }
+    if (filterMode === "needs_confirmation") {
+      return hasPendingConfirmation(order);
+    }
+    return true; // "all"
   });
 
-  const uniqueStatuses = Array.from(new Set(orders.map((o) => o.status).filter(Boolean)));
+  const pendingCount = orders.filter(hasPendingConfirmation).length;
+  const upcomingCount = orders.filter(o => isUpcoming(o.date)).length;
+  const relevantCount = orders.filter(o => hasPendingConfirmation(o) || isUpcoming(o.date)).length;
   const totalRegistrants = orders.reduce((sum, o) => sum + o.subitems.length, 0);
-  const openOrders = orders.filter((o) => o.status === "בתהליך שיבוץ").length;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -352,15 +391,23 @@ export default function AdminClient({ user }: AdminClientProps) {
                 <span className="text-gray-700 font-medium">{orders.length}</span>
                 <span className="text-gray-500">הזמנות</span>
               </div>
-              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2 text-sm">
-                <span className="w-2 h-2 rounded-full bg-green-500" />
-                <span className="text-green-700 font-medium">{openOrders}</span>
-                <span className="text-green-600">פתוחות</span>
-              </div>
+              {pendingCount > 0 && (
+                <div className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-xl px-4 py-2 text-sm">
+                  <span className="w-2 h-2 rounded-full bg-orange-500" />
+                  <span className="text-orange-700 font-medium">{pendingCount}</span>
+                  <span className="text-orange-600">ממתינות לאישור</span>
+                </div>
+              )}
+              {upcomingCount > 0 && (
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-sm">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  <span className="text-blue-700 font-medium">{upcomingCount}</span>
+                  <span className="text-blue-600">בימים הקרובים</span>
+                </div>
+              )}
               <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-xl px-4 py-2 text-sm">
                 <span className="w-2 h-2 rounded-full bg-purple-400" />
                 <span className="text-purple-700 font-medium">{totalRegistrants}</span>
-
                 <span className="text-purple-600">מועמדים</span>
               </div>
             </div>
@@ -369,46 +416,66 @@ export default function AdminClient({ user }: AdminClientProps) {
 
         {/* Filters */}
         {!loading && orders.length > 0 && (
-          <div className="flex gap-3 mb-5 flex-wrap">
-            <div className="flex-1 min-w-0">
-              <div className="relative">
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                  <svg
-                    className="w-4 h-4 text-gray-400"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                    />
-                  </svg>
-                </div>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="חיפוש לפי שם או מיקום..."
-                  className="w-full border border-gray-200 rounded-xl pr-10 pl-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                />
-              </div>
+          <div className="flex flex-col gap-3 mb-5">
+            {/* Filter tabs */}
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => setFilterMode("relevant")}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                  filterMode === "relevant"
+                    ? "bg-gray-900 text-white border-gray-900 shadow-sm"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                רלוונטי עכשיו
+                {relevantCount > 0 && (
+                  <span className={`mr-2 text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                    filterMode === "relevant" ? "bg-white/20 text-white" : "bg-orange-100 text-orange-600"
+                  }`}>{relevantCount}</span>
+                )}
+              </button>
+              <button
+                onClick={() => setFilterMode("needs_confirmation")}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                  filterMode === "needs_confirmation"
+                    ? "bg-orange-500 text-white border-orange-500 shadow-sm"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                ממתינות לאישור
+                {pendingCount > 0 && (
+                  <span className={`mr-2 text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                    filterMode === "needs_confirmation" ? "bg-white/20 text-white" : "bg-orange-100 text-orange-600"
+                  }`}>{pendingCount}</span>
+                )}
+              </button>
+              <button
+                onClick={() => setFilterMode("all")}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                  filterMode === "all"
+                    ? "bg-gray-900 text-white border-gray-900 shadow-sm"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                כל ההזמנות
+              </button>
             </div>
 
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="all">כל הסטטוסים</option>
-              {uniqueStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
+            {/* Search */}
+            <div className="relative">
+              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="חיפוש לפי שם או מיקום..."
+                className="w-full border border-gray-200 rounded-xl pr-10 pl-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              />
+            </div>
           </div>
         )}
 
@@ -442,10 +509,14 @@ export default function AdminClient({ user }: AdminClientProps) {
               </svg>
             </div>
             <h3 className="text-lg font-semibold text-gray-600 mb-1">
-              {searchQuery || filterStatus !== "all" ? "לא נמצאו הזמנות" : "אין הזמנות במערכת"}
+              {filterMode === "relevant" ? "אין הזמנות דחופות כרגע" :
+               filterMode === "needs_confirmation" ? "אין הזמנות הממתינות לאישור" :
+               searchQuery ? "לא נמצאו הזמנות" : "אין הזמנות במערכת"}
             </h3>
             <p className="text-sm text-gray-400 max-w-xs">
-              {searchQuery || filterStatus !== "all" ? "נסה לשנות את מסנני החיפוש" : "כרגע אין הזמנות במערכת"}
+              {filterMode === "relevant" ? "כל ההזמנות הקרובות מטופלות" :
+               filterMode === "needs_confirmation" ? "כל המועמדויות אושרו או נדחו" :
+               searchQuery ? "נסה לשנות את מסנן החיפוש" : "כרגע אין הזמנות במערכת"}
             </p>
           </div>
         ) : (
