@@ -16,6 +16,12 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
   const pathname = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportTitle, setReportTitle] = useState("");
+  const [reportDescription, setReportDescription] = useState("");
+  const [reportSending, setReportSending] = useState(false);
+  const [reportError, setReportError] = useState("");
+  const [reportSuccess, setReportSuccess] = useState("");
 
   const locationText = userLocation?.trim() ? userLocation : "לא מצא";
 
@@ -30,10 +36,51 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
     }
   }
 
+  async function handleSubmitIssue() {
+    const title = reportTitle.trim();
+    const description = reportDescription.trim();
+
+    if (!title || !description) {
+      setReportError("יש למלא כותרת ותיאור תקלה");
+      return;
+    }
+
+    setReportSending(true);
+    setReportError("");
+    setReportSuccess("");
+
+    try {
+      const response = await fetch("/api/report-issue", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          description,
+          path: pathname,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        setReportError(data?.error || "שגיאה בשליחת הדיווח");
+        return;
+      }
+
+      setReportSuccess("הדיווח נשלח בהצלחה. תודה!");
+      setReportTitle("");
+      setReportDescription("");
+    } catch {
+      setReportError("שגיאה בשליחת הדיווח");
+    } finally {
+      setReportSending(false);
+    }
+  }
+
   const navLinks =
     userRole === "מנהל"
       ? [
-          { href: "/orders", label: "הזמנות פתוחות" },
           { href: "/admin", label: "ניהול הזמנות" },
         ]
       : [
@@ -105,6 +152,32 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
                 )}
               </div>
             </div>
+
+            <button
+              onClick={() => {
+                setReportOpen(true);
+                setMenuOpen(false);
+                setReportError("");
+                setReportSuccess("");
+              }}
+              className="hidden sm:flex items-center gap-1.5 text-sm text-gray-500 hover:text-orange-500 transition-colors duration-150"
+              title="דיווח תקלה"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01M5.062 20h13.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.33 17c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+              דווח תקלה
+            </button>
 
             <button
               onClick={handleLogout}
@@ -202,6 +275,18 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
             ))}
 
             <button
+              onClick={() => {
+                setReportOpen(true);
+                setMenuOpen(false);
+                setReportError("");
+                setReportSuccess("");
+              }}
+              className="w-full text-right px-3 py-2 text-sm text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+            >
+              דווח תקלה
+            </button>
+
+            <button
               onClick={handleLogout}
               disabled={loggingOut}
               className="w-full text-right px-3 py-2 text-sm text-red-500 hover:bg-red-50 rounded-lg transition-colors"
@@ -211,6 +296,75 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
           </div>
         )}
       </div>
+
+      {reportOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-xl shadow-xl border border-gray-100">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">דיווח תקלה</h3>
+              <button
+                onClick={() => {
+                  setReportOpen(false);
+                  setReportError("");
+                  setReportSuccess("");
+                }}
+                className="p-1 text-gray-400 hover:text-gray-600"
+                aria-label="סגור"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <input
+                value={reportTitle}
+                onChange={(e) => setReportTitle(e.target.value)}
+                placeholder="כותרת קצרה"
+                maxLength={120}
+                className="input-field text-sm"
+              />
+              <textarea
+                value={reportDescription}
+                onChange={(e) => setReportDescription(e.target.value)}
+                placeholder="תיאור התקלה"
+                maxLength={3000}
+                rows={5}
+                className="input-field text-sm resize-y"
+              />
+
+              {reportError && (
+                <p className="text-xs text-red-600">{reportError}</p>
+              )}
+              {reportSuccess && (
+                <p className="text-xs text-green-600">{reportSuccess}</p>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => {
+                    setReportOpen(false);
+                    setReportError("");
+                    setReportSuccess("");
+                  }}
+                  className="btn-secondary text-sm"
+                  disabled={reportSending}
+                >
+                  סגור
+                </button>
+                <button
+                  onClick={handleSubmitIssue}
+                  disabled={reportSending}
+                  className="btn-primary text-sm disabled:opacity-60"
+                >
+                  {reportSending ? "שולח..." : "שלח דיווח"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </nav>
   );
 }
