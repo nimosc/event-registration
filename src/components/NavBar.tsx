@@ -160,7 +160,7 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
                 setReportError("");
                 setReportSuccess("");
               }}
-              className="hidden sm:flex items-center gap-1.5 text-sm text-gray-500 hover:text-orange-500 transition-colors duration-150"
+              className="hidden sm:flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700 font-semibold transition-colors duration-150"
               title="דיווח תקלה"
             >
               <svg
@@ -281,7 +281,7 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
                 setReportError("");
                 setReportSuccess("");
               }}
-              className="w-full text-right px-3 py-2 text-sm text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+              className="w-full text-right px-3 py-2 text-sm text-red-600 hover:bg-red-50 font-semibold rounded-lg transition-colors"
             >
               דווח תקלה
             </button>
@@ -299,16 +299,31 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
 
       {reportOpen && (
         <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-xl shadow-xl border border-gray-100">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-900">דיווח תקלה</h3>
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between bg-gradient-to-b from-red-50 to-white">
+              <div className="flex items-start gap-2.5">
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-red-100 text-red-600">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01M5.062 20h13.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.33 17c-.77 1.333.192 3 1.732 3z"
+                    />
+                  </svg>
+                </span>
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">דיווח תקלה</h3>
+                  <p className="text-xs text-gray-600 mt-0.5">עוזר לנו לשפר את המערכת</p>
+                </div>
+              </div>
               <button
                 onClick={() => {
                   setReportOpen(false);
                   setReportError("");
                   setReportSuccess("");
                 }}
-                className="p-1 text-gray-400 hover:text-gray-600"
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 aria-label="סגור"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -317,22 +332,41 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
-              <input
-                value={reportTitle}
-                onChange={(e) => setReportTitle(e.target.value)}
-                placeholder="כותרת קצרה"
-                maxLength={120}
-                className="input-field text-sm"
-              />
-              <textarea
-                value={reportDescription}
-                onChange={(e) => setReportDescription(e.target.value)}
-                placeholder="תיאור התקלה"
-                maxLength={3000}
-                rows={5}
-                className="input-field text-sm resize-y"
-              />
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-gray-700 leading-5 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                על מנת שנשפר את המערכת, במידה ונתקלתם בבאג או משהו שלא עובד כשורה - אנא דווחו.
+                <br />
+                נודה לכם אם תהיו מפורטים ככל האפשר.
+              </p>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-gray-700">כותרת התקלה</label>
+                  <span className="text-[11px] text-gray-400">{reportTitle.length}/120</span>
+                </div>
+                <input
+                  value={reportTitle}
+                  onChange={(e) => setReportTitle(e.target.value)}
+                  placeholder="לדוגמה: אי אפשר לשמור הזמנה"
+                  maxLength={120}
+                  className="input-field text-sm"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-gray-700">תיאור מפורט</label>
+                  <span className="text-[11px] text-gray-400">{reportDescription.length}/3000</span>
+                </div>
+                <textarea
+                  value={reportDescription}
+                  onChange={(e) => setReportDescription(e.target.value)}
+                  placeholder="מה ניסית לעשות, מה קרה בפועל, ומה ציפית שיקרה"
+                  maxLength={3000}
+                  rows={6}
+                  className="input-field text-sm resize-y"
+                />
+              </div>
 
               {reportError && (
                 <p className="text-xs text-red-600">{reportError}</p>
@@ -341,14 +375,14 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
                 <p className="text-xs text-green-600">{reportSuccess}</p>
               )}
 
-              <div className="flex items-center justify-end gap-2 pt-1">
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   onClick={() => {
                     setReportOpen(false);
                     setReportError("");
                     setReportSuccess("");
                   }}
-                  className="btn-secondary text-sm"
+                  className="btn-secondary text-sm min-w-20"
                   disabled={reportSending}
                 >
                   סגור
@@ -356,7 +390,7 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
                 <button
                   onClick={handleSubmitIssue}
                   disabled={reportSending}
-                  className="btn-primary text-sm disabled:opacity-60"
+                  className="btn-primary text-sm min-w-24 disabled:opacity-60"
                 >
                   {reportSending ? "שולח..." : "שלח דיווח"}
                 </button>
