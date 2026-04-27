@@ -7,6 +7,7 @@ export interface Order {
   name: string;
   date: string;
   location: string;
+  activityHours?: string;
   orderLocation: string;
   status: string;
   requiredCount: number;
@@ -30,11 +31,19 @@ function formatDate(dateStr: string): string {
   return `${parseInt(day)} ב${HEBREW_MONTHS[parseInt(month)]} ${year}`;
 }
 
-function SpotsBar({ required, assigned }: { required: number; assigned: number }) {
+function formatDateDDMMYYYY(dateStr: string): string {
+  if (!dateStr) return "";
+  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return dateStr;
+  const [, year, month, day] = match;
+  return `${day}/${month}/${year}`;
+}
+
+function SpotsBar({ required, assigned, forceDone }: { required: number; assigned: number; forceDone?: boolean }) {
   if (required <= 0) return null;
   const capacityLimit = Math.ceil(required * 1.5);
   const remaining = capacityLimit - assigned;
-  const isClosed = remaining <= 0;
+  const isClosed = forceDone || remaining <= 0;
   const isOverRequired = !isClosed && assigned >= required;
   const isAlmostFull = !isClosed && !isOverRequired && (assigned / capacityLimit) >= 0.75;
   const percent = Math.min(100, (assigned / capacityLimit) * 100);
@@ -44,7 +53,7 @@ function SpotsBar({ required, assigned }: { required: number; assigned: number }
       <div className="flex justify-between text-xs mb-1.5">
         <span className="text-gray-500">{assigned} מועמדים / {required} נדרשים</span>
         <span className={`font-medium ${isClosed ? "text-red-500" : isOverRequired ? "text-orange-500" : isAlmostFull ? "text-orange-400" : "text-gray-500"}`}>
-          {isClosed ? "נסגרה קבלת מועמדויות" : `עוד ${remaining} מקומות`}
+          {isClosed ? "הסתיים השיבוץ" : `עוד ${remaining} מקומות`}
         </span>
       </div>
       <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -78,8 +87,12 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isAssignmentDone = order.status === "הסתיים השיבוץ";
   const isClosed = order.requiredCount > 0 && order.spotsRemaining <= 0;
   const isPast = order.date ? new Date(order.date) < new Date(new Date().toDateString()) : false;
+  const formattedDateForTitle = formatDateDDMMYYYY(order.date);
+  const titleParts = [order.location, formattedDateForTitle].filter(Boolean);
+  const orderTitle = titleParts.length > 0 ? titleParts.join(" | ") : order.name;
 
   async function handleClick() {
     setLoading(true);
@@ -102,13 +115,13 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
       order.isRegistered ? "border-blue-200" : "border-gray-100"
     }`}>
       {/* Top accent */}
-      <div className={`h-1 ${order.isRegistered ? "bg-blue-500" : isClosed ? "bg-gray-300" : "bg-emerald-400"}`} />
+      <div className={`h-1 ${order.isRegistered ? "bg-blue-500" : isAssignmentDone ? "bg-slate-400" : isClosed ? "bg-gray-300" : "bg-emerald-400"}`} />
 
       <div className="p-5">
         {/* Header */}
         <div className="flex items-start justify-between gap-2 mb-3">
           <h3 className="font-semibold text-gray-900 text-base leading-snug flex-1 min-w-0">
-            {order.name}
+            {orderTitle}
           </h3>
           {order.isRegistered && (
             <span className="flex-shrink-0 inline-flex items-center gap-1 bg-blue-100 text-blue-600 text-xs font-semibold px-2.5 py-1 rounded-full">
@@ -141,10 +154,19 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
               <span className="truncate">{order.location}</span>
             </div>
           )}
+          {order.activityHours && (
+            <div className="flex items-start gap-2 text-sm text-gray-500">
+              <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="min-w-0 leading-snug">{order.activityHours}</span>
+            </div>
+          )}
         </div>
 
         {/* Spots bar */}
-        <SpotsBar required={order.requiredCount} assigned={order.assignedCount} />
+        <SpotsBar required={order.requiredCount} assigned={order.assignedCount} forceDone={isAssignmentDone} />
 
         {/* Error */}
         {error && (
@@ -158,6 +180,10 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
           {isPast ? (
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 text-center">
               המועד עבר
+            </div>
+          ) : isAssignmentDone ? (
+            <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-slate-100 text-slate-500 text-center">
+              הסתיים השיבוץ - לא ניתן להירשם
             </div>
           ) : order.isRegistered ? (
             <button

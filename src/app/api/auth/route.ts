@@ -40,9 +40,9 @@ export async function POST(request: NextRequest) {
     // Check if active
     const statusCol = getColumnValue(artist, "color_mm18wjry");
     const status = statusCol?.text || "";
-    if (status === "לא פעיל") {
+    if (status !== "פעיל") {
       return NextResponse.json(
-        { error: "החשבון שלך אינו פעיל. פנה למנהל." },
+        { error: "החשבון שלך אינו פעיל כרגע." },
         { status: 403 }
       );
     }
@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
       id: artist.id,
       name: artist.name,
       role,
+      status,
       location,
     };
 

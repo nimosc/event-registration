@@ -24,6 +24,7 @@ interface AdminOrder {
   name: string;
   date: string;
   location: string;
+  activityHours?: string;
   status: string;
   requiredCount: number;
   assignedCount: number;
@@ -61,13 +62,178 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+type AssignableArtist = { id: string; name: string };
+
+function AssignArtistControls({
+  orderId,
+  onRefresh,
+}: {
+  orderId: string;
+  onRefresh: () => Promise<void>;
+}) {
+  const [artists, setArtists] = useState<AssignableArtist[]>([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  const [selectedArtistId, setSelectedArtistId] = useState<string>("");
+  const [assigning, setAssigning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+
+    let cancelled = false;
+    async function load() {
+      setOptionsLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/admin/assignable-artists?orderId=${encodeURIComponent(orderId)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "שגיאה בטעינת האומנים");
+          return;
+        }
+        const list: AssignableArtist[] = Array.isArray(data.artists)
+          ? data.artists.map((a: any) => ({ id: String(a.id), name: String(a.name) }))
+          : [];
+        if (cancelled) return;
+        setArtists(list);
+        setSelectedArtistId((prev) =>
+          prev && list.some((a) => a.id === prev) ? prev : list[0]?.id ?? ""
+        );
+      } catch {
+        if (!cancelled) setError("שגיאת רשת בטעינת האומנים");
+      } finally {
+        if (!cancelled) setOptionsLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [modalOpen, orderId]);
+
+  async function handleAssign() {
+    if (!selectedArtistId) return;
+    setAssigning(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, artistId: selectedArtistId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "שגיאה בשיבוץ");
+        return;
+      }
+      await onRefresh();
+      setModalOpen(false);
+    } catch {
+      setError("שגיאת רשת בשיבוץ");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <h4 className="text-sm font-semibold text-gray-700">שיבוץ אומן</h4>
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setModalOpen(true);
+          }}
+          disabled={assigning}
+          className="btn-primary whitespace-nowrap"
+        >
+          שיבוץ
+        </button>
+      </div>
+
+      {modalOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+          onClick={() => setModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-gray-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h4 className="text-lg font-semibold text-gray-900">שיבוץ אומן</h4>
+                <p className="text-sm text-gray-500 mt-1">בחר אומן פעיל לשיבוץ להזמנה</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                aria-label="סגור"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
+
+            {optionsLoading ? (
+              <div>
+                <div className="h-11 bg-gray-100 rounded-xl animate-pulse border border-gray-50" />
+                <div className="h-11 bg-gray-100 rounded-xl animate-pulse border border-gray-50 mt-3" />
+              </div>
+            ) : artists.length === 0 ? (
+              <p className="text-sm text-gray-500">אין אומנים פעילים זמינים לשיבוץ להזמנה הזו.</p>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">אומן פעיל</label>
+                <select
+                  value={selectedArtistId}
+                  onChange={(e) => setSelectedArtistId(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {artists.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end mt-5">
+              <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={handleAssign}
+                disabled={!selectedArtistId || assigning || optionsLoading || artists.length === 0}
+                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {assigning ? "שיבוץ..." : "שיבוץ"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrderAccordion({
   order,
   onConfirm,
   statusMode,
+  onRefresh,
 }: {
   order: AdminOrder;
   statusMode: "candidacy" | "arrival";
+  onRefresh: () => Promise<void>;
   onConfirm: (
     orderId: string,
     subitemId: string,
@@ -165,6 +331,24 @@ function OrderAccordion({
                   {order.location}
                 </span>
               )}
+              {order.activityHours && (
+                <span className="flex items-center gap-1">
+                  <svg
+                    className="w-3.5 h-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  {order.activityHours}
+                </span>
+              )}
             </div>
 
             {/* Progress */}
@@ -216,6 +400,12 @@ function OrderAccordion({
       {/* Registrants list */}
       {expanded && (
         <div className="border-t border-gray-100 px-5 py-3">
+          {statusMode === "candidacy" && (
+            <AssignArtistControls
+              orderId={order.id}
+              onRefresh={onRefresh}
+            />
+          )}
           <RegistrantsList
             orderId={order.id}
             registrants={registrants}
@@ -251,17 +441,32 @@ function LoadingSkeleton() {
 }
 
 type FilterMode = "relevant" | "needs_confirmation" | "all";
+type TimeFilterMode = "future" | "past" | "all";
+
+function parseDateOnly(dateStr: string): Date | null {
+  if (!dateStr) return null;
+  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  return new Date(`${match[1]}-${match[2]}-${match[3]}`);
+}
 
 function isUpcoming(dateStr: string, days = 14): boolean {
-  if (!dateStr) return false;
-  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) return false;
-  const eventDate = new Date(`${match[1]}-${match[2]}-${match[3]}`);
+  const eventDate = parseDateOnly(dateStr);
+  if (!eventDate) return false;
   const now = new Date();
   now.setHours(0, 0, 0, 0);
   const cutoff = new Date(now);
   cutoff.setDate(cutoff.getDate() + days);
   return eventDate >= now && eventDate <= cutoff;
+}
+
+function matchesTimeFilter(dateStr: string, mode: TimeFilterMode): boolean {
+  if (mode === "all") return true;
+  const eventDate = parseDateOnly(dateStr);
+  if (!eventDate) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return mode === "past" ? eventDate < today : eventDate >= today;
 }
 
 function hasPendingConfirmation(
@@ -279,6 +484,7 @@ export default function AdminClient({ user }: AdminClientProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<FilterMode>("relevant");
+  const [timeFilterMode, setTimeFilterMode] = useState<TimeFilterMode>("future");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusMode, setStatusMode] = useState<"candidacy" | "arrival">("candidacy");
 
@@ -362,10 +568,13 @@ export default function AdminClient({ user }: AdminClientProps) {
 
   // Filter and search
   const filteredOrders = orders.filter((order) => {
+    if (!matchesTimeFilter(order.date, timeFilterMode)) return false;
+
     const matchesSearch =
       !searchQuery ||
       order.name.includes(searchQuery) ||
-      order.location.includes(searchQuery);
+      order.location.includes(searchQuery) ||
+      (order.activityHours ?? "").includes(searchQuery);
     if (!matchesSearch) return false;
 
     if (filterMode === "relevant") {
@@ -480,6 +689,40 @@ export default function AdminClient({ user }: AdminClientProps) {
         {/* Filters */}
         {!loading && orders.length > 0 && (
           <div className="flex flex-col gap-3 mb-5">
+            {/* Time filter */}
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => setTimeFilterMode("future")}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                  timeFilterMode === "future"
+                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                עתידי
+              </button>
+              <button
+                onClick={() => setTimeFilterMode("past")}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                  timeFilterMode === "past"
+                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                עבר
+              </button>
+              <button
+                onClick={() => setTimeFilterMode("all")}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                  timeFilterMode === "all"
+                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                הכל
+              </button>
+            </div>
+
             {/* Filter tabs */}
             <div className="flex gap-2 flex-wrap">
               <button
@@ -572,14 +815,30 @@ export default function AdminClient({ user }: AdminClientProps) {
               </svg>
             </div>
             <h3 className="text-lg font-semibold text-gray-600 mb-1">
-              {filterMode === "relevant" ? "אין הזמנות דחופות כרגע" :
-               filterMode === "needs_confirmation" ? "אין הזמנות הממתינות לאישור" :
-               searchQuery ? "לא נמצאו הזמנות" : "אין הזמנות במערכת"}
+              {filterMode === "relevant"
+                ? timeFilterMode === "future"
+                  ? "אין הזמנות עתידיות דחופות כרגע"
+                  : "אין הזמנות עבר דחופות כרגע"
+                : filterMode === "needs_confirmation"
+                  ? "אין הזמנות הממתינות לאישור"
+                  : searchQuery
+                    ? "לא נמצאו הזמנות"
+                    : timeFilterMode === "future"
+                      ? "אין הזמנות עתידיות במערכת"
+                      : "אין הזמנות עבר במערכת"}
             </h3>
             <p className="text-sm text-gray-400 max-w-xs">
-              {filterMode === "relevant" ? "כל ההזמנות הקרובות מטופלות" :
-               filterMode === "needs_confirmation" ? "כל המועמדויות אושרו או נדחו" :
-               searchQuery ? "נסה לשנות את מסנן החיפוש" : "כרגע אין הזמנות במערכת"}
+              {filterMode === "relevant"
+                ? timeFilterMode === "future"
+                  ? "כל ההזמנות העתידיות המטופלות מוצגות"
+                  : "לא נמצאו הזמנות עבר שעונות למסנן"
+                : filterMode === "needs_confirmation"
+                  ? "כל המועמדויות אושרו או נדחו"
+                  : searchQuery
+                    ? "נסה לשנות את מסנן החיפוש"
+                    : timeFilterMode === "future"
+                      ? "כרגע אין הזמנות מהיום והלאה"
+                      : "כרגע אין הזמנות שחלף זמנן"}
             </p>
           </div>
         ) : (
@@ -590,6 +849,7 @@ export default function AdminClient({ user }: AdminClientProps) {
                 order={order}
                 onConfirm={handleConfirm}
                 statusMode={statusMode}
+                onRefresh={fetchOrders}
               />
             ))}
           </div>

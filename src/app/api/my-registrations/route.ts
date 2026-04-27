@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { getAllOrders, getColumnValue, getArtistTaxStatus, parseLinkedItemIds, mapMondayAttendanceToInternal } from "@/lib/monday";
+import {
+  getAllOrders,
+  getColumnValue,
+  getArtistTaxStatus,
+  parseLinkedItemIds,
+  mapMondayAttendanceToInternal,
+  ORDER_ACTIVITY_HOURS_COLUMN_ID,
+} from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
 export async function GET() {
@@ -20,6 +27,7 @@ export async function GET() {
       orderName: string;
       date: string;
       location: string;
+      activityHours: string;
       orderStatus: string;
       subitemId: string;
       attendanceStatus: string;
@@ -30,6 +38,7 @@ export async function GET() {
       const dateCol = getColumnValue(order, "date_mm18mqn2");
       const statusCol = getColumnValue(order, "color_mm18ej76");
       const locationCol = getColumnValue(order, "text_mm1894y7");
+      const activityHoursCol = getColumnValue(order, ORDER_ACTIVITY_HOURS_COLUMN_ID);
 
       const subitems = order.subitems || [];
 
@@ -52,6 +61,7 @@ export async function GET() {
             orderName: order.name,
             date: dateCol?.text || "",
             location: locationCol?.text || "",
+            activityHours: (activityHoursCol?.text || "").trim(),
             orderStatus: statusCol?.text || "",
             subitemId: sub.id,
             attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),

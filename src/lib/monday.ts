@@ -5,6 +5,7 @@ export const BOARDS = {
   ARTISTS: 5092847546,
   ORDERS: 5092847547,
   SUBITEMS: 5092847598,
+  ISSUE_REPORTS: 5094343821,
 } as const;
 
 export interface MondayColumnValue {
@@ -354,6 +355,34 @@ export async function getArtistLocationOptions(): Promise<string[]> {
   return getDropdownOptionsInternal(BOARDS.ARTISTS, ARTIST_LOCATION_COLUMN_ID);
 }
 
+export async function getArtistByIdBasic(
+  artistId: string
+): Promise<{ id: string; name: string; statusText: string } | null> {
+  const query = `
+    query {
+      items(ids: [${artistId}]) {
+        id
+        name
+        board { id }
+        column_values(ids: ["${ARTIST_ACTIVE_STATUS_COLUMN_ID}"]) {
+          id
+          text
+          value
+        }
+      }
+    }
+  `;
+
+  const data = await mondayQuery<{ items: (MondayItem & { board?: { id: string } })[] }>(query);
+  const artist = data.items?.[0] ?? null;
+  if (!artist) return null;
+  if (artist.board?.id && artist.board.id !== String(BOARDS.ARTISTS)) return null;
+
+  const col = getColumnValue(artist as unknown as MondayItem, ARTIST_ACTIVE_STATUS_COLUMN_ID);
+  const statusText = (col?.text || "").trim();
+  return { id: artist.id, name: artist.name, statusText };
+}
+
 export function parseLinkedItemIds(value: string | null | undefined): number[] {
   if (!value) return [];
   try {
@@ -373,6 +402,9 @@ export function parseLinkedItemIds(value: string | null | undefined): number[] {
 
 export const ARTIST_LOCATION_COLUMN_ID = "dropdown_mm1qvq5q";
 export const ORDER_LOCATION_COLUMN_ID = "dropdown_mm1qvq5q";
+/** שעות פעילות — טקסט על פריט הזמנה */
+export const ORDER_ACTIVITY_HOURS_COLUMN_ID = "text_mm2b57xq";
+export const ARTIST_ACTIVE_STATUS_COLUMN_ID = "color_mm18wjry";
 export const STATUS_OPEN = "בתהליך שיבוץ";
 export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
 export const STATUS_ASSIGNMENT_DONE = "הסתיים השיבוץ";
@@ -440,7 +472,7 @@ export async function getOpenOrders() {
           items {
             id
             name
-            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ORDER_LOCATION_COLUMN_ID}"]) {
+            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ORDER_LOCATION_COLUMN_ID}", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
               id
               text
               value
@@ -474,7 +506,7 @@ export async function getAllOrders() {
           items {
             id
             name
-            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914"]) {
+            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
               id
               text
               value
@@ -496,6 +528,111 @@ export async function getAllOrders() {
 
   const data = await mondayQuery<{ boards: MondayBoard[] }>(query);
   return data.boards[0]?.items_page?.items ?? [];
+}
+
+/** Admin orders API shape — shared by getAllOrders mapping and getOrderAdminSnapshotById */
+export interface AdminOrderSubitem {
+  id: string;
+  name: string;
+  linkedArtistIds: number[];
+  role: string;
+  attendanceStatus: string;
+  candidacyStatus: string;
+}
+
+export interface AdminOrderDto {
+  id: string;
+  name: string;
+  date: string;
+  location: string;
+  /** שעות פעילות (עמודת טקסט ב-Monday) */
+  activityHours: string;
+  status: string;
+  requiredCount: number;
+  assignedCount: number;
+  spotsRemaining: number;
+  subitems: AdminOrderSubitem[];
+}
+
+export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto {
+  const dateCol = getColumnValue(item, "date_mm18mqn2");
+  const statusCol = getColumnValue(item, "color_mm18ej76");
+  const locationCol = getColumnValue(item, "text_mm1894y7");
+  const activityHoursCol = getColumnValue(item, ORDER_ACTIVITY_HOURS_COLUMN_ID);
+  const requiredCol = getColumnValue(item, "numeric_mm185aw7");
+  const assignedCol = getColumnValue(item, "numeric_mm18d914");
+
+  const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
+  const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
+
+  const subitems = (item.subitems || []).map((sub) => {
+    const relationCol = sub.column_values.find(
+      (cv) => cv.id === "board_relation_mm18r4da"
+    );
+    const roleCol = sub.column_values.find((cv) => cv.id === "dropdown_mm18519p");
+    const attendanceCol = sub.column_values.find((cv) => cv.id === "color_mm18bjdk");
+    const candidacyCol = sub.column_values.find(
+      (cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID
+    );
+
+    return {
+      id: sub.id,
+      name: sub.name,
+      linkedArtistIds: parseLinkedItemIds(relationCol?.value),
+      role: roleCol?.text || "",
+      attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
+      candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
+    };
+  });
+
+  return {
+    id: item.id,
+    name: item.name,
+    date: dateCol?.text || "",
+    location: locationCol?.text || "",
+    activityHours: (activityHoursCol?.text || "").trim(),
+    status: statusCol?.text || "",
+    requiredCount,
+    assignedCount,
+    spotsRemaining: Math.max(0, requiredCount - assignedCount),
+    subitems,
+  };
+}
+
+const ADMIN_ORDER_ITEM_COLUMNS = `column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
+          id
+          text
+          value
+        }`;
+
+const ADMIN_ORDER_SUBITEM_COLUMNS = `column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}"]) {
+            id
+            text
+            value
+          }`;
+
+/** One order with the same columns as getAllOrders — for webhooks and post-mutation checks */
+export async function getOrderAdminSnapshotById(
+  orderId: string
+): Promise<AdminOrderDto | null> {
+  const query = `
+    query {
+      items(ids: [${orderId}]) {
+        id
+        name
+        ${ADMIN_ORDER_ITEM_COLUMNS}
+        subitems {
+          id
+          name
+          ${ADMIN_ORDER_SUBITEM_COLUMNS}
+        }
+      }
+    }
+  `;
+  const data = await mondayQuery<{ items: MondayItem[] }>(query);
+  const item = data.items?.[0];
+  if (!item) return null;
+  return mapMondayOrderItemToAdminOrder(item);
 }
 
 // ─── Mutation: Update artist location ────────────────────────────────────────
@@ -706,4 +843,60 @@ export async function updateCandidacyConfirmation(
   `;
 
   await mondayQuery(query);
+}
+
+export interface IssueReportInput {
+  title: string;
+  description: string;
+  reporterName: string;
+  reporterRole: "אומן" | "מנהל";
+  path?: string;
+}
+
+export async function createIssueReport(input: IssueReportInput): Promise<{ itemId: string }> {
+  const title = input.title.trim();
+  const description = input.description.trim();
+  const location = (input.path || "").trim() || "לא צוין";
+  const now = new Date().toLocaleString("he-IL", { hour12: false });
+
+  const createItemMutation = `
+    mutation ($boardId: ID!, $itemName: String!) {
+      create_item(board_id: $boardId, item_name: $itemName) {
+        id
+      }
+    }
+  `;
+
+  const createItemData = await mondayQuery<{ create_item: { id: string } }>(
+    createItemMutation,
+    {
+      boardId: BOARDS.ISSUE_REPORTS,
+      itemName: title,
+    }
+  );
+
+  const itemId = createItemData.create_item.id;
+  const updateBody = [
+    `תיאור התקלה:`,
+    description,
+    "",
+    `דווח על ידי: ${input.reporterName} (${input.reporterRole})`,
+    `עמוד: ${location}`,
+    `תאריך דיווח: ${now}`,
+  ].join("\n");
+
+  const createUpdateMutation = `
+    mutation ($itemId: ID!, $body: String!) {
+      create_update(item_id: $itemId, body: $body) {
+        id
+      }
+    }
+  `;
+
+  await mondayQuery(createUpdateMutation, {
+    itemId,
+    body: updateBody,
+  });
+
+  return { itemId };
 }

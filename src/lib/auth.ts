@@ -8,6 +8,7 @@ export interface SessionUser {
   id: string;
   name: string;
   role: "אומן" | "מנהל";
+  status: string;
   location?: string;
 }
 
@@ -38,6 +39,7 @@ export async function verifySession(token: string): Promise<SessionUser | null> 
       id: payload.id as string,
       name: payload.name as string,
       role: payload.role as "אומן" | "מנהל",
+      status: (payload.status as string) || "",
       location: payload.location as string | undefined,
     };
   } catch {

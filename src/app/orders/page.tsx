@@ -10,5 +10,9 @@ export default async function OrdersPage() {
     redirect("/");
   }
 
+  if (session.role === "מנהל") {
+    redirect("/admin");
+  }
+
   return <OrdersClient user={session} />;
 }

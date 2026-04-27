@@ -7,9 +7,10 @@ export const dynamic = "force-dynamic";
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ ID?: string }>;
+  searchParams: Promise<{ ID?: string; inactive?: string }>;
 }) {
   const [session, params] = await Promise.all([getSession(), searchParams]);
-  if (session) redirect("/orders");
-  return <LoginClient magicId={params.ID} />;
+  const isInactive = params.inactive === "1";
+  if (session && !isInactive) redirect(session.role === "מנהל" ? "/admin" : "/orders");
+  return <LoginClient magicId={params.ID} inactive={isInactive} />;
 }

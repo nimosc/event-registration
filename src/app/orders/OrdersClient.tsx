@@ -80,7 +80,6 @@ function LoadingSkeleton() {
 }
 
 export default function OrdersClient({ user }: OrdersClientProps) {
-  console.log("[OrdersClient] user session:", JSON.stringify(user));
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -181,11 +180,10 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     if (selectedMonth === "upcoming") {
       const cur = getCurrentMonthKey();
       const next = getNextMonthKey();
-      const filtered = result.filter(o => {
+      return result.filter(o => {
         const k = parseMonthKey(o.date);
         return k === cur || k === next;
       });
-      return filtered.length > 0 ? filtered : result;
     }
     return result.filter(o => parseMonthKey(o.date) === selectedMonth);
   }, [orders, selectedMonth, selectedLocation]);
@@ -237,9 +235,26 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     setOrders(prev => prev.filter(o => o.id !== orderId));
   }
 
+  const isPastOrder = (date: string) =>
+    date ? new Date(date) < new Date(new Date().toDateString()) : false;
+
   const myOrders = filteredOrders.filter(o => o.isRegistered);
-  const openOrders = filteredOrders.filter(o => !o.isRegistered && (o.requiredCount === 0 || o.spotsRemaining > 0));
-  const closedOrders = filteredOrders.filter(o => !o.isRegistered && o.requiredCount > 0 && o.spotsRemaining <= 0);
+  const assignmentDoneOrders = filteredOrders.filter(
+    (o) => !o.isRegistered && o.status === "הסתיים השיבוץ" && !isPastOrder(o.date)
+  );
+  const openOrders = filteredOrders.filter(
+    (o) =>
+      !o.isRegistered &&
+      o.status !== "הסתיים השיבוץ" &&
+      (o.requiredCount === 0 || o.spotsRemaining > 0)
+  );
+  const closedOrders = filteredOrders.filter(
+    (o) =>
+      !o.isRegistered &&
+      o.status !== "הסתיים השיבוץ" &&
+      o.requiredCount > 0 &&
+      o.spotsRemaining <= 0
+  );
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -367,6 +382,13 @@ export default function OrdersClient({ user }: OrdersClientProps) {
                   <span className="w-2 h-2 rounded-full bg-green-500" />
                   <span className="text-green-700 font-medium">{openOrders.length}</span>
                   <span className="text-green-600">פתוחות למועמדות</span>
+                </div>
+              )}
+              {assignmentDoneOrders.length > 0 && (
+                <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 text-sm">
+                  <span className="w-2 h-2 rounded-full bg-slate-500" />
+                  <span className="text-slate-700 font-medium">{assignmentDoneOrders.length}</span>
+                  <span className="text-slate-600">הסתיים השיבוץ</span>
                 </div>
               )}
             </div>
@@ -510,6 +532,22 @@ export default function OrdersClient({ user }: OrdersClientProps) {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-50">
                   {closedOrders.map(order => (
+                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Assignment done */}
+            {assignmentDoneOrders.length > 0 && (
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1 h-4 bg-slate-400 rounded-full" />
+                  <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">הסתיים השיבוץ</h2>
+                  <span className="text-xs bg-slate-100 text-slate-600 font-semibold px-2 py-0.5 rounded-full">{assignmentDoneOrders.length}</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
+                  {assignmentDoneOrders.map(order => (
                     <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
                   ))}
                 </div>

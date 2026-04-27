@@ -4,8 +4,10 @@ import {
   getColumnValue,
   parseLinkedItemIds,
   ORDER_LOCATION_COLUMN_ID,
+  ORDER_ACTIVITY_HOURS_COLUMN_ID,
   STATUS_OPEN,
   STATUS_CANDIDACY_CLOSED,
+  STATUS_ASSIGNMENT_DONE,
   parseDropdownLabel,
   mapMondayAttendanceToInternal,
 } from "@/lib/monday";
@@ -16,6 +18,8 @@ export interface OrderData {
   name: string;
   date: string;
   location: string;
+  /** שעות פעילות */
+  activityHours: string;
   orderLocation: string;
   status: string;
   requiredCount: number;
@@ -56,6 +60,7 @@ export async function GET() {
         const requiredCol = getColumnValue(item, "numeric_mm185aw7");
         const assignedCol = getColumnValue(item, "numeric_mm18d914");
         const orderLocationCol = getColumnValue(item, ORDER_LOCATION_COLUMN_ID);
+        const activityHoursCol = getColumnValue(item, ORDER_ACTIVITY_HOURS_COLUMN_ID);
 
         const status = statusCol?.text || "";
         const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
@@ -91,6 +96,7 @@ export async function GET() {
           name: item.name,
           date: dateCol?.text || "",
           location: locationCol?.text || "",
+          activityHours: (activityHoursCol?.text || "").trim(),
           orderLocation,
           status,
           requiredCount,
@@ -103,6 +109,7 @@ export async function GET() {
       })
       .filter((order) =>
         order.status === STATUS_OPEN ||
+        order.status === STATUS_ASSIGNMENT_DONE ||
         (order.status === STATUS_CANDIDACY_CLOSED && order.isRegistered)
       );
 

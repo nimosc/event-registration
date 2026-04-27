@@ -95,7 +95,7 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
           {/* Logo / Brand */}
           <div className="flex items-center gap-3">
             <Image
-              src="https://d33zzd4k5u0xj2.cloudfront.net/eu-central-1/workforms-form-logos/d2838fce-3c76-48ff-88dc-efb4b28e39be_581908"
+              src="/images/logo.png.png"
               alt="לוגו העמותה"
               width={80}
               height={40}

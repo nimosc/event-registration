@@ -39,9 +39,10 @@ export async function GET(request: NextRequest) {
     }
 
     const statusCol = artist.column_values.find((cv) => cv.id === "color_mm18wjry");
-    if (statusCol?.text === "לא פעיל") {
+    const status = (statusCol?.text || "").trim();
+    if (status !== "פעיל") {
       return NextResponse.json(
-        { error: "החשבון אינו פעיל. פנה למנהל." },
+        { error: "החשבון אינו פעיל כרגע." },
         { status: 403 }
       );
     }
@@ -55,16 +56,11 @@ export async function GET(request: NextRequest) {
     let location: string | undefined =
       locationCol?.text?.trim() || parseDropdownLabel(locationCol?.value)?.trim() || undefined;
 
-    console.log(`[magic-link] id=${id} artist="${artist.name}" LOCATION_COL_ID="${ARTIST_LOCATION_COLUMN_ID}"`);
-    console.log(`[magic-link] column_values:`, JSON.stringify(artist.column_values));
-    console.log(`[magic-link] locationCol:`, JSON.stringify(locationCol));
-    console.log(`[magic-link] resolved location="${location}"`);
-
-    const user: SessionUser = { id: artist.id, name: artist.name, role, location };
+    const user: SessionUser = { id: artist.id, name: artist.name, role, status, location };
     const token = await createSession(user);
     await setSessionCookie(token);
 
-    return NextResponse.json({ success: true, user, _debug: { locationCol, location } });
+    return NextResponse.json({ success: true, user });
   } catch (error) {
     console.error("Magic link error:", error);
     return NextResponse.json({ error: "שגיאה פנימית בשרת" }, { status: 500 });

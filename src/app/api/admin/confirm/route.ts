@@ -2,16 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   updateAttendanceConfirmation,
   updateCandidacyConfirmation,
-  getOrderById,
+  getOrderAdminSnapshotById,
+  getArtistByIdBasic,
   updateOrderStatus,
-  getColumnValue,
   STATUS_CANDIDACY_CLOSED,
   STATUS_ASSIGNMENT_DONE,
-  mapInternalAttendanceToMonday,
-  mapInternalCandidacyToMonday,
-  CANDIDACY_STATUS_COLUMN_ID,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
+import { postJsonWebhookOrLog } from "@/lib/webhook";
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -51,27 +49,43 @@ export async function PATCH(request: NextRequest) {
     if (mode === "candidacy") {
       await updateCandidacyConfirmation(subitemId, internalLabel);
 
-      // Fetch updated order to check candidacy confirmed count vs required.
-      const order = await getOrderById(orderId);
-      if (order) {
-        const requiredCol = getColumnValue(order, "numeric_mm185aw7");
-        const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
-        const statusCol = getColumnValue(order, "color_mm18ej76");
-        const currentStatus = statusCol?.text || "";
-
-        const subitems = order.subitems || [];
-        const mondayConfirmedLabel = mapInternalCandidacyToMonday("מאושר");
-        const confirmedCount = subitems.filter((sub) => {
-          const candidacyCol = sub.column_values.find(
-            (cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID
-          );
-          return candidacyCol?.text === mondayConfirmedLabel;
-        }).length;
+      const orderDto = await getOrderAdminSnapshotById(orderId);
+      if (orderDto) {
+        const { requiredCount, status: currentStatus, subitems } = orderDto;
+        const confirmedCount = subitems.filter((s) => s.candidacyStatus === "מאושר").length;
 
         if (action === "confirm" && requiredCount > 0 && confirmedCount >= requiredCount) {
           await updateOrderStatus(orderId, STATUS_ASSIGNMENT_DONE);
         } else if (action === "reject" && currentStatus === STATUS_ASSIGNMENT_DONE) {
           await updateOrderStatus(orderId, STATUS_CANDIDACY_CLOSED);
+        }
+
+        if (action === "confirm") {
+          const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
+          if (webhookUrl) {
+            const registration = orderDto.subitems.find((s) => s.id === subitemId);
+            if (registration) {
+              const firstArtistId = registration.linkedArtistIds[0];
+              const artist =
+                firstArtistId != null
+                  ? await getArtistByIdBasic(String(firstArtistId))
+                  : null;
+
+              await postJsonWebhookOrLog(webhookUrl, {
+                event: "candidacy_approved",
+                approvedAt: new Date().toISOString(),
+                admin: { id: session.id, name: session.name },
+                order: orderDto,
+                registration,
+                artist,
+              });
+            } else {
+              console.error(
+                "[Webhook] candidacy approved: subitem not in snapshot",
+                subitemId
+              );
+            }
+          }
         }
       }
     } else {

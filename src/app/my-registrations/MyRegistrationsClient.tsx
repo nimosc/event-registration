@@ -10,6 +10,7 @@ interface Registration {
   orderName: string;
   date: string;
   location: string;
+  activityHours?: string;
   orderStatus: string;
   subitemId: string;
   attendanceStatus: string;
@@ -355,7 +356,19 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map(reg => (
                     <tr key={reg.subitemId} className="bg-white hover:bg-gray-50/70 transition-colors">
-                      <td className="px-5 py-4 font-medium text-gray-900">{reg.location || reg.orderName || "—"}</td>
+                      <td className="px-5 py-4 font-medium text-gray-900">
+                        <div className="space-y-1">
+                          <div>{reg.location || reg.orderName || "—"}</div>
+                          {reg.activityHours ? (
+                            <div className="text-xs font-normal text-gray-500 flex items-start gap-1.5">
+                              <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              <span>{reg.activityHours}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="px-5 py-4">
                         <span className="inline-block px-3 py-1.5 rounded-lg bg-gray-100 border border-gray-200 text-sm font-medium text-gray-800 tabular-nums">
                           {formatDateDDMMYY(reg.date)}
