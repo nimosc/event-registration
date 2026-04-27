@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllOrders, mapMondayOrderItemToAdminOrder } from "@/lib/monday";
+import { getAllOrdersWithCandidacyDateConflicts } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
 export async function GET() {
@@ -13,8 +13,7 @@ export async function GET() {
       return NextResponse.json({ error: "גישה נדחתה" }, { status: 403 });
     }
 
-    const items = await getAllOrders();
-    const orders = items.map((item) => mapMondayOrderItemToAdminOrder(item));
+    const orders = await getAllOrdersWithCandidacyDateConflicts();
 
     return NextResponse.json({ orders });
   } catch (error) {

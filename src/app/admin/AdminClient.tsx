@@ -36,6 +36,8 @@ interface AdminOrder {
     role: string;
     attendanceStatus: string;
     candidacyStatus?: string;
+    hasCandidacyDateConflict?: boolean;
+    candidacyDateConflictMessage?: string;
   }[];
 }
 
@@ -249,6 +251,8 @@ function OrderAccordion({
     role: sub.role,
     attendanceStatus: sub.attendanceStatus,
     candidacyStatus: sub.candidacyStatus,
+    hasCandidacyDateConflict: sub.hasCandidacyDateConflict,
+    candidacyDateConflictMessage: sub.candidacyDateConflictMessage,
   }));
 
   const filledPercent =
@@ -265,8 +269,18 @@ function OrderAccordion({
     statusMode === "arrival"
       ? order.subitems.filter((s) => s.attendanceStatus !== "מאושר" && s.attendanceStatus !== "נדחה").length
       : order.subitems.filter(
-          (s) => (s.candidacyStatus ?? "") !== "מאושר" && (s.candidacyStatus ?? "") !== "נדחה"
+          (s) =>
+            (s.candidacyStatus ?? "") !== "מאושר" &&
+            (s.candidacyStatus ?? "") !== "נדחה" &&
+            !s.hasCandidacyDateConflict
         ).length;
+
+  const blockedByDateConflictCount =
+    statusMode === "candidacy"
+      ? order.subitems.filter((s) => (s.candidacyStatus ?? "") !== "מאושר" && Boolean(s.hasCandidacyDateConflict)).length
+      : 0;
+
+  const candidateTargetCount = pendingCount + blockedByDateConflictCount;
 
   return (
     <div className={`bg-white rounded-xl overflow-hidden transition-colors ${
@@ -290,6 +304,12 @@ function OrderAccordion({
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 border border-orange-200">
                   <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
                   {pendingCount} ממתינים לאישור
+                </span>
+              )}
+              {blockedByDateConflictCount > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                  {blockedByDateConflictCount} חסומים בגלל תאריך
                 </span>
               )}
             </div>
@@ -376,7 +396,7 @@ function OrderAccordion({
 
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
             <span className="text-xs text-gray-500 flex items-center gap-1">
-              {order.subitems.length} מועמדים
+              {candidateTargetCount} מועמדים צריך
             </span>
             <svg
               className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
@@ -475,6 +495,7 @@ function hasPendingConfirmation(
 ): boolean {
   return order.subitems.some((s) => {
     const cur = mode === "arrival" ? s.attendanceStatus : s.candidacyStatus ?? "";
+    if (mode === "candidacy" && s.hasCandidacyDateConflict) return false;
     return cur !== "מאושר" && cur !== "נדחה";
   });
 }

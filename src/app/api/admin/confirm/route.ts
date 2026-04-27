@@ -4,6 +4,7 @@ import {
   updateCandidacyConfirmation,
   getOrderAdminSnapshotById,
   getArtistByIdBasic,
+  getCandidacyDateConflictForSubitem,
   updateOrderStatus,
   STATUS_CANDIDACY_CLOSED,
   STATUS_ASSIGNMENT_DONE,
@@ -47,6 +48,16 @@ export async function PATCH(request: NextRequest) {
     const internalLabel = action === "confirm" ? "מאושר" : "נדחה";
 
     if (mode === "candidacy") {
+      if (action === "confirm") {
+        const conflict = await getCandidacyDateConflictForSubitem(orderId, subitemId);
+        if (conflict.hasConflict) {
+          return NextResponse.json(
+            { error: conflict.message || "לא ניתן לאשר - האומן כבר מאושר באירוע אחר באותו תאריך" },
+            { status: 409 }
+          );
+        }
+      }
+
       await updateCandidacyConfirmation(subitemId, internalLabel);
 
       const orderDto = await getOrderAdminSnapshotById(orderId);

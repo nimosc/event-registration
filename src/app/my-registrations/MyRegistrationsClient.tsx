@@ -328,17 +328,24 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
         ) : (
           <>
           {filtered.length > 0 && selectedMonth !== "all" && (
-            <div className="mb-4 flex justify-end">
+            <div className="mb-4 space-y-2">
+              <div className="flex justify-end">
               <button
                 type="button"
-                onClick={() => setShowMonthInvoiceModal(true)}
-                className="btn-primary inline-flex items-center gap-2"
+                disabled
+                aria-disabled="true"
+                title="בקרוב יהיה ניתן להעלות את החשבוניות כאן - כרגע בפיתוח"
+                className="btn-primary inline-flex items-center gap-2 opacity-60 cursor-not-allowed"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
                 העלה חשבוניות לחודש
               </button>
+            </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                בקרוב יהיה ניתן להעלות את החשבוניות כאן - כרגע בפיתוח
+              </div>
             </div>
           )}
           <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm shadow-gray-200/50">
@@ -386,8 +393,10 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
                         <div className="flex flex-wrap gap-2 justify-end">
                           <button
                             type="button"
-                            onClick={() => setInvoiceFor(reg)}
-                            className="btn-secondary text-xs py-2 px-3 rounded-lg"
+                            disabled
+                            aria-disabled="true"
+                            title="בקרוב יהיה ניתן להעלות את החשבוניות כאן - כרגע בפיתוח"
+                            className="btn-secondary text-xs py-2 px-3 rounded-lg opacity-60 cursor-not-allowed"
                           >
                             חשבונית
                           </button>

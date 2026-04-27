@@ -538,6 +538,8 @@ export interface AdminOrderSubitem {
   role: string;
   attendanceStatus: string;
   candidacyStatus: string;
+  hasCandidacyDateConflict?: boolean;
+  candidacyDateConflictMessage?: string;
 }
 
 export interface AdminOrderDto {
@@ -552,6 +554,92 @@ export interface AdminOrderDto {
   assignedCount: number;
   spotsRemaining: number;
   subitems: AdminOrderSubitem[];
+}
+
+function toDateOnlyKey(input: string): string {
+  const match = (input || "").match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+type ApprovedArtistDateEntry = {
+  orderId: string;
+  orderName: string;
+  subitemId: string;
+};
+
+function buildApprovedArtistDateIndex(orders: AdminOrderDto[]): Map<string, ApprovedArtistDateEntry[]> {
+  const index = new Map<string, ApprovedArtistDateEntry[]>();
+  for (const order of orders) {
+    const dateKey = toDateOnlyKey(order.date);
+    if (!dateKey) continue;
+    for (const sub of order.subitems) {
+      if ((sub.candidacyStatus ?? "") !== "מאושר") continue;
+      const artistId = sub.linkedArtistIds[0];
+      if (!artistId) continue;
+      const key = `${artistId}::${dateKey}`;
+      const list = index.get(key) ?? [];
+      list.push({
+        orderId: order.id,
+        orderName: order.name,
+        subitemId: sub.id,
+      });
+      index.set(key, list);
+    }
+  }
+  return index;
+}
+
+export function withCandidacyDateConflictFlags(orders: AdminOrderDto[]): AdminOrderDto[] {
+  const approvedIndex = buildApprovedArtistDateIndex(orders);
+  return orders.map((order) => {
+    const dateKey = toDateOnlyKey(order.date);
+    if (!dateKey) return order;
+    return {
+      ...order,
+      subitems: order.subitems.map((sub) => {
+        const artistId = sub.linkedArtistIds[0];
+        if (!artistId) return sub;
+        const key = `${artistId}::${dateKey}`;
+        const approvedOnSameDate = approvedIndex.get(key) ?? [];
+        const conflict = approvedOnSameDate.find((entry) => entry.orderId !== order.id);
+        if (!conflict) {
+          return {
+            ...sub,
+            hasCandidacyDateConflict: false,
+            candidacyDateConflictMessage: "",
+          };
+        }
+        return {
+          ...sub,
+          hasCandidacyDateConflict: true,
+          candidacyDateConflictMessage: `כבר מאושר באירוע אחר באותו תאריך (${conflict.orderName})`,
+        };
+      }),
+    };
+  });
+}
+
+export async function getAllOrdersWithCandidacyDateConflicts(): Promise<AdminOrderDto[]> {
+  const items = await getAllOrders();
+  const orders = items.map((item) => mapMondayOrderItemToAdminOrder(item));
+  return withCandidacyDateConflictFlags(orders);
+}
+
+export async function getCandidacyDateConflictForSubitem(
+  orderId: string,
+  subitemId: string
+): Promise<{ hasConflict: boolean; message?: string }> {
+  const orders = await getAllOrdersWithCandidacyDateConflicts();
+  const order = orders.find((o) => o.id === orderId);
+  if (!order) return { hasConflict: false };
+  const subitem = order.subitems.find((s) => s.id === subitemId);
+  if (!subitem) return { hasConflict: false };
+  if (!subitem.hasCandidacyDateConflict) return { hasConflict: false };
+  return {
+    hasConflict: true,
+    message: subitem.candidacyDateConflictMessage || "לא ניתן לאשר - האומן כבר מאושר באירוע אחר באותו תאריך",
+  };
 }
 
 export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto {
