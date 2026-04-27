@@ -38,6 +38,23 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    // #region agent log
+    console.log("[DBG H6] confirm request", { orderId, subitemId, action, mode });
+    fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
+      body: JSON.stringify({
+        sessionId: "8e21a1",
+        runId: "initial",
+        hypothesisId: "H6",
+        location: "src/app/api/admin/confirm/route.ts:PATCH",
+        message: "Received confirm request",
+        data: { orderId, subitemId, action, mode },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
     if (action !== "confirm" && action !== "reject") {
       return NextResponse.json(
         { error: "פעולה לא חוקית" },
@@ -50,6 +67,22 @@ export async function PATCH(request: NextRequest) {
     if (mode === "candidacy") {
       if (action === "confirm") {
         const conflict = await getCandidacyDateConflictForSubitem(orderId, subitemId);
+        // #region agent log
+        console.log("[DBG H6] conflict result", { orderId, subitemId, hasConflict: conflict.hasConflict });
+        fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
+          body: JSON.stringify({
+            sessionId: "8e21a1",
+            runId: "initial",
+            hypothesisId: "H6",
+            location: "src/app/api/admin/confirm/route.ts:PATCH",
+            message: "Conflict check result before candidacy confirm",
+            data: { orderId, subitemId, hasConflict: conflict.hasConflict },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         if (conflict.hasConflict) {
           return NextResponse.json(
             { error: conflict.message || "לא ניתן לאשר - האומן כבר מאושר באירוע אחר באותו תאריך" },

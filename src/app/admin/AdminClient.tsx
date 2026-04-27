@@ -19,6 +19,14 @@ function formatDate(dateStr: string): string {
   return `${parseInt(day)} ב${HEBREW_MONTHS[parseInt(month)]} ${year}`;
 }
 
+function formatDateDDMMYYYY(dateStr: string): string {
+  if (!dateStr) return "";
+  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return dateStr;
+  const [, year, month, day] = match;
+  return `${day}/${month}/${year}`;
+}
+
 interface AdminOrder {
   id: string;
   name: string;
@@ -244,6 +252,8 @@ function OrderAccordion({
   ) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const titleParts = [order.location, formatDateDDMMYYYY(order.date)].filter(Boolean);
+  const orderTitle = titleParts.length > 0 ? titleParts.join(" | ") : order.name;
 
   const registrants: Registrant[] = order.subitems.map((sub) => ({
     id: sub.id,
@@ -297,7 +307,7 @@ function OrderAccordion({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <h3 className="font-semibold text-gray-900 text-base">
-                {order.name}
+                {orderTitle}
               </h3>
               <StatusBadge status={order.status} />
               {pendingCount > 0 && (
@@ -500,6 +510,67 @@ function hasPendingConfirmation(
   });
 }
 
+function normalizeArtistNameKey(name: string): string {
+  return (name || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function getSubitemArtistConflictKey(sub: AdminOrder["subitems"][number]): string {
+  const artistId = sub.linkedArtistIds[0];
+  if (artistId) return `id:${artistId}`;
+  const nameKey = normalizeArtistNameKey(sub.name);
+  if (!nameKey) return "";
+  return `name:${nameKey}`;
+}
+
+function toDateOnlyKey(dateStr: string): string {
+  const match = (dateStr || "").match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function recomputeCandidacyDateConflicts(orders: AdminOrder[]): AdminOrder[] {
+  const approvedIndex = new Map<string, { orderId: string }[]>();
+
+  for (const order of orders) {
+    const dateKey = toDateOnlyKey(order.date);
+    if (!dateKey) continue;
+    for (const sub of order.subitems) {
+      if ((sub.candidacyStatus ?? "") !== "מאושר") continue;
+      const artistKey = getSubitemArtistConflictKey(sub);
+      if (!artistKey) continue;
+      const key = `${artistKey}::${dateKey}`;
+      const list = approvedIndex.get(key) ?? [];
+      list.push({ orderId: order.id });
+      approvedIndex.set(key, list);
+    }
+  }
+
+  return orders.map((order) => {
+    const dateKey = toDateOnlyKey(order.date);
+    if (!dateKey) return order;
+    return {
+      ...order,
+      subitems: order.subitems.map((sub) => {
+        const artistKey = getSubitemArtistConflictKey(sub);
+        if (!artistKey) {
+          return {
+            ...sub,
+            hasCandidacyDateConflict: false,
+            candidacyDateConflictMessage: "",
+          };
+        }
+        const key = `${artistKey}::${dateKey}`;
+        const conflict = (approvedIndex.get(key) ?? []).some((entry) => entry.orderId !== order.id);
+        return {
+          ...sub,
+          hasCandidacyDateConflict: conflict,
+          candidacyDateConflictMessage: conflict ? "אושר לאירוע באותו תאריך" : "",
+        };
+      }),
+    };
+  });
+}
+
 export default function AdminClient({ user }: AdminClientProps) {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -551,10 +622,10 @@ export default function AdminClient({ user }: AdminClientProps) {
       throw new Error(data.error || "שגיאה בעדכון הסטטוס");
     }
 
-    // Update local state — subitem status + order status if threshold reached
-    setOrders((prev) =>
-      prev.map((order) => {
+    setOrders((prev) => {
+      const updated = prev.map((order) => {
         if (order.id !== orderId) return order;
+
         const updatedSubitems = order.subitems.map((sub) =>
           sub.id === subitemId
             ? {
@@ -566,12 +637,13 @@ export default function AdminClient({ user }: AdminClientProps) {
               }
             : sub
         );
+
         const confirmedCount =
           mode === "arrival"
             ? updatedSubitems.filter((s) => s.attendanceStatus === "מאושר").length
             : updatedSubitems.filter((s) => (s.candidacyStatus ?? "") === "מאושר").length;
+
         let newStatus = order.status;
-        // Order status changes only after "אישור מועמדות".
         if (
           mode === "candidacy" &&
           action === "confirm" &&
@@ -582,30 +654,42 @@ export default function AdminClient({ user }: AdminClientProps) {
         } else if (mode === "candidacy" && action === "reject" && order.status === "הסתיים השיבוץ") {
           newStatus = "סגירת קבלת מועמדויות";
         }
+
         return { ...order, subitems: updatedSubitems, status: newStatus };
-      })
-    );
+      });
+
+      return recomputeCandidacyDateConflicts(updated);
+    });
   }
 
   // Filter and search
-  const filteredOrders = orders.filter((order) => {
-    if (!matchesTimeFilter(order.date, timeFilterMode)) return false;
+  const filteredOrders = orders
+    .filter((order) => {
+      if (!matchesTimeFilter(order.date, timeFilterMode)) return false;
 
-    const matchesSearch =
-      !searchQuery ||
-      order.name.includes(searchQuery) ||
-      order.location.includes(searchQuery) ||
-      (order.activityHours ?? "").includes(searchQuery);
-    if (!matchesSearch) return false;
+      const matchesSearch =
+        !searchQuery ||
+        order.name.includes(searchQuery) ||
+        order.location.includes(searchQuery) ||
+        (order.activityHours ?? "").includes(searchQuery);
+      if (!matchesSearch) return false;
 
-    if (filterMode === "relevant") {
-      return hasPendingConfirmation(order, statusMode) || isUpcoming(order.date);
-    }
-    if (filterMode === "needs_confirmation") {
-      return hasPendingConfirmation(order, statusMode);
-    }
-    return true; // "all"
-  });
+      if (filterMode === "relevant") {
+        return hasPendingConfirmation(order, statusMode) || isUpcoming(order.date);
+      }
+      if (filterMode === "needs_confirmation") {
+        return hasPendingConfirmation(order, statusMode);
+      }
+      return true; // "all"
+    })
+    .sort((a, b) => {
+      const aDate = parseDateOnly(a.date);
+      const bDate = parseDateOnly(b.date);
+      if (aDate && bDate) return aDate.getTime() - bDate.getTime();
+      if (aDate) return -1;
+      if (bDate) return 1;
+      return a.name.localeCompare(b.name, "he");
+    });
 
   const pendingCount = orders.filter((o) => hasPendingConfirmation(o, statusMode)).length;
   const upcomingCount = orders.filter(o => isUpcoming(o.date)).length;

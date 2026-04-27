@@ -80,6 +80,8 @@ function RegistrantRow({ registrant, onAction, statusMode }: RegistrantRowProps)
 
   const confirmBlockedByDateConflict =
     statusMode === "candidacy" && Boolean(registrant.hasCandidacyDateConflict);
+  const shouldShowStatusBadge =
+    !confirmBlockedByDateConflict || currentStatus === "מאושר";
 
   return (
     <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0 gap-3">
@@ -100,11 +102,11 @@ function RegistrantRow({ registrant, onAction, statusMode }: RegistrantRowProps)
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
-        <AttendanceBadge status={currentStatus} />
+        {shouldShowStatusBadge && <AttendanceBadge status={currentStatus} />}
         {confirmBlockedByDateConflict && (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200">
             <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-            {registrant.candidacyDateConflictMessage || "כבר מאושר באירוע אחר באותו תאריך"}
+            {registrant.candidacyDateConflictMessage || "אושר לאירוע באותו תאריך"}
           </span>
         )}
 

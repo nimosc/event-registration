@@ -14,6 +14,27 @@ export async function GET() {
     }
 
     const orders = await getAllOrdersWithCandidacyDateConflicts();
+    // #region agent log
+    fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
+      body: JSON.stringify({
+        sessionId: "8e21a1",
+        runId: "initial",
+        hypothesisId: "H4",
+        location: "src/app/api/admin/orders/route.ts:GET",
+        message: "Returning admin orders payload",
+        data: {
+          ordersCount: orders.length,
+          flaggedSubitemsCount: orders.reduce(
+            (sum, o) => sum + o.subitems.filter((s) => s.hasCandidacyDateConflict).length,
+            0
+          ),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     return NextResponse.json({ orders });
   } catch (error) {
