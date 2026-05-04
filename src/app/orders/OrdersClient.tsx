@@ -242,16 +242,21 @@ export default function OrdersClient({ user }: OrdersClientProps) {
   const assignmentDoneOrders = filteredOrders.filter(
     (o) => !o.isRegistered && o.status === "הסתיים השיבוץ" && !isPastOrder(o.date)
   );
+  const candidacyClosedOrders = filteredOrders.filter(
+    (o) => !o.isRegistered && o.status === "סגירת קבלת מועמדויות" && !isPastOrder(o.date)
+  );
   const openOrders = filteredOrders.filter(
     (o) =>
       !o.isRegistered &&
       o.status !== "הסתיים השיבוץ" &&
+      o.status !== "סגירת קבלת מועמדויות" &&
       (o.requiredCount === 0 || o.spotsRemaining > 0)
   );
   const closedOrders = filteredOrders.filter(
     (o) =>
       !o.isRegistered &&
       o.status !== "הסתיים השיבוץ" &&
+      o.status !== "סגירת קבלת מועמדויות" &&
       o.requiredCount > 0 &&
       o.spotsRemaining <= 0
   );
@@ -516,6 +521,22 @@ export default function OrdersClient({ user }: OrdersClientProps) {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {openOrders.map(order => (
+                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Candidacy submission closed */}
+            {candidacyClosedOrders.length > 0 && (
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1 h-4 bg-orange-300 rounded-full" />
+                  <h2 className="text-sm font-semibold text-orange-500 uppercase tracking-wide">הגשת המועמדויות הסתיימה</h2>
+                  <span className="text-xs bg-orange-100 text-orange-500 font-semibold px-2 py-0.5 rounded-full">{candidacyClosedOrders.length}</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
+                  {candidacyClosedOrders.map(order => (
                     <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
                   ))}
                 </div>

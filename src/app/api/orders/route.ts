@@ -110,7 +110,7 @@ export async function GET() {
       .filter((order) =>
         order.status === STATUS_OPEN ||
         order.status === STATUS_ASSIGNMENT_DONE ||
-        (order.status === STATUS_CANDIDACY_CLOSED && order.isRegistered)
+        order.status === STATUS_CANDIDACY_CLOSED
       );
 
     console.log(`[/api/orders] returning ${orders.length} orders (total ${Date.now() - start}ms)`);

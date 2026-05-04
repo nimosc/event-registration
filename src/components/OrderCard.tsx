@@ -88,6 +88,7 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
   const [error, setError] = useState<string | null>(null);
 
   const isAssignmentDone = order.status === "הסתיים השיבוץ";
+  const isCandidacyClosed = order.status === "סגירת קבלת מועמדויות";
   const isClosed = order.requiredCount > 0 && order.spotsRemaining <= 0;
   const isPast = order.date ? new Date(order.date) < new Date(new Date().toDateString()) : false;
   const formattedDateForTitle = formatDateDDMMYYYY(order.date);
@@ -115,7 +116,7 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
       order.isRegistered ? "border-blue-200" : "border-gray-100"
     }`}>
       {/* Top accent */}
-      <div className={`h-1 ${order.isRegistered ? "bg-blue-500" : isAssignmentDone ? "bg-slate-400" : isClosed ? "bg-gray-300" : "bg-emerald-400"}`} />
+      <div className={`h-1 ${order.isRegistered ? "bg-blue-500" : isAssignmentDone ? "bg-slate-400" : isCandidacyClosed ? "bg-orange-300" : isClosed ? "bg-gray-300" : "bg-emerald-400"}`} />
 
       <div className="p-5">
         {/* Header */}
@@ -180,6 +181,10 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
           {isPast ? (
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 text-center">
               המועד עבר
+            </div>
+          ) : isCandidacyClosed && !order.isRegistered ? (
+            <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-orange-50 text-orange-500 text-center border border-orange-100">
+              הגשת המועמדויות הסתיימה
             </div>
           ) : isAssignmentDone ? (
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-slate-100 text-slate-500 text-center">
