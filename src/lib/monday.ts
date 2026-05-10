@@ -482,6 +482,7 @@ export const ARTIST_ACTIVE_STATUS_COLUMN_ID = "color_mm18wjry";
 export const STATUS_OPEN = "בתהליך שיבוץ";
 export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
 export const STATUS_ASSIGNMENT_DONE = "הסתיים השיבוץ";
+export const STATUS_CANCELLED = "בוטל";
 
 export async function getAllArtists() {
   const columnIds = `["text_mm18xbdq", "text_mm18d6vn", "color_mm18btbr", "color_mm18wjry", "${ARTIST_LOCATION_COLUMN_ID}"]`;

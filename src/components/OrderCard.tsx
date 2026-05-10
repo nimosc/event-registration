@@ -89,6 +89,7 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
 
   const isAssignmentDone = order.status === "הסתיים השיבוץ";
   const isCandidacyClosed = order.status === "סגירת קבלת מועמדויות";
+  const isCancelled = order.status === "בוטל";
   const isClosed = order.requiredCount > 0 && order.spotsRemaining <= 0;
   const isPast = order.date ? new Date(order.date) < new Date(new Date().toDateString()) : false;
   const formattedDateForTitle = formatDateDDMMYYYY(order.date);
@@ -113,18 +114,28 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
 
   return (
     <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 hover:shadow-md ${
-      order.isRegistered ? "border-blue-200" : "border-gray-100"
+      isCancelled ? "border-red-200 opacity-75" : order.isRegistered ? "border-blue-200" : "border-gray-100"
     }`}>
       {/* Top accent */}
-      <div className={`h-1 ${order.isRegistered ? "bg-blue-500" : isAssignmentDone ? "bg-slate-400" : isCandidacyClosed ? "bg-orange-300" : isClosed ? "bg-gray-300" : "bg-emerald-400"}`} />
+      <div className={`h-1 ${isCancelled ? "bg-red-400" : order.isRegistered ? "bg-blue-500" : isAssignmentDone ? "bg-slate-400" : isCandidacyClosed ? "bg-orange-300" : isClosed ? "bg-gray-300" : "bg-emerald-400"}`} />
 
       <div className="p-5">
+        {/* Cancelled banner */}
+        {isCancelled && (
+          <div className="flex items-center justify-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-3">
+            <svg className="w-4 h-4 text-red-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <span className="text-red-600 font-bold text-sm">האירוע בוטל</span>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-start justify-between gap-2 mb-3">
-          <h3 className="font-semibold text-gray-900 text-base leading-snug flex-1 min-w-0">
+          <h3 className={`font-semibold text-base leading-snug flex-1 min-w-0 ${isCancelled ? "text-gray-400 line-through" : "text-gray-900"}`}>
             {orderTitle}
           </h3>
-          {order.isRegistered && (
+          {order.isRegistered && !isCancelled && (
             <span className="flex-shrink-0 inline-flex items-center gap-1 bg-blue-100 text-blue-600 text-xs font-semibold px-2.5 py-1 rounded-full">
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -178,7 +189,11 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
 
         {/* Action */}
         <div className="mt-4">
-          {isPast ? (
+          {isCancelled ? (
+            <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-red-50 text-red-400 text-center border border-red-100">
+              לא ניתן להירשם — האירוע בוטל
+            </div>
+          ) : isPast ? (
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 text-center">
               המועד עבר
             </div>

@@ -238,7 +238,8 @@ export default function OrdersClient({ user }: OrdersClientProps) {
   const isPastOrder = (date: string) =>
     date ? new Date(date) < new Date(new Date().toDateString()) : false;
 
-  const myOrders = filteredOrders.filter(o => o.isRegistered);
+  const cancelledOrders = filteredOrders.filter((o) => o.status === "בוטל");
+  const myOrders = filteredOrders.filter(o => o.isRegistered && o.status !== "בוטל");
   const assignmentDoneOrders = filteredOrders.filter(
     (o) => !o.isRegistered && o.status === "הסתיים השיבוץ" && !isPastOrder(o.date)
   );
@@ -250,6 +251,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       !o.isRegistered &&
       o.status !== "הסתיים השיבוץ" &&
       o.status !== "סגירת קבלת מועמדויות" &&
+      o.status !== "בוטל" &&
       (o.requiredCount === 0 || o.spotsRemaining > 0)
   );
   const closedOrders = filteredOrders.filter(
@@ -257,6 +259,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       !o.isRegistered &&
       o.status !== "הסתיים השיבוץ" &&
       o.status !== "סגירת קבלת מועמדויות" &&
+      o.status !== "בוטל" &&
       o.requiredCount > 0 &&
       o.spotsRemaining <= 0
   );
@@ -569,6 +572,22 @@ export default function OrdersClient({ user }: OrdersClientProps) {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
                   {assignmentDoneOrders.map(order => (
+                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Cancelled */}
+            {cancelledOrders.length > 0 && (
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1 h-4 bg-red-400 rounded-full" />
+                  <h2 className="text-sm font-semibold text-red-500 uppercase tracking-wide">אירועים שבוטלו</h2>
+                  <span className="text-xs bg-red-100 text-red-500 font-semibold px-2 py-0.5 rounded-full">{cancelledOrders.length}</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {cancelledOrders.map(order => (
                     <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
                   ))}
                 </div>

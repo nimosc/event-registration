@@ -8,6 +8,7 @@ import {
   STATUS_OPEN,
   STATUS_CANDIDACY_CLOSED,
   STATUS_ASSIGNMENT_DONE,
+  STATUS_CANCELLED,
   parseDropdownLabel,
   mapMondayAttendanceToInternal,
 } from "@/lib/monday";
@@ -110,7 +111,8 @@ export async function GET() {
       .filter((order) =>
         order.status === STATUS_OPEN ||
         order.status === STATUS_ASSIGNMENT_DONE ||
-        order.status === STATUS_CANDIDACY_CLOSED
+        order.status === STATUS_CANDIDACY_CLOSED ||
+        order.status === STATUS_CANCELLED
       );
 
     console.log(`[/api/orders] returning ${orders.length} orders (total ${Date.now() - start}ms)`);
