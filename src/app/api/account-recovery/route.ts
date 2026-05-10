@@ -125,14 +125,16 @@ async function resolvePhoneColumnId(): Promise<string> {
 }
 
 async function getArtistsWithPhoneColumn(phoneColumnId: string): Promise<ArtistWithPhone[]> {
-  const artistsQuery = `
+  const columnIds = `["${ARTIST_ACTIVE_STATUS_COLUMN_ID}", "${phoneColumnId}"]`;
+  const firstPageQuery = `
     query {
       boards(ids: [${BOARDS.ARTISTS}]) {
         items_page(limit: 500) {
+          cursor
           items {
             id
             name
-            column_values(ids: ["${ARTIST_ACTIVE_STATUS_COLUMN_ID}", "${phoneColumnId}"]) {
+            column_values(ids: ${columnIds}) {
               id
               text
               value
@@ -142,10 +144,38 @@ async function getArtistsWithPhoneColumn(phoneColumnId: string): Promise<ArtistW
       }
     }
   `;
-  const artistsData = await mondayQuery<{
-    boards: { items_page: { items: ArtistWithPhone[] } }[];
-  }>(artistsQuery);
-  return artistsData.boards?.[0]?.items_page?.items ?? [];
+  const firstData = await mondayQuery<{
+    boards: { items_page: { cursor?: string | null; items: ArtistWithPhone[] } }[];
+  }>(firstPageQuery);
+  const firstPage = firstData.boards?.[0]?.items_page;
+  const items: ArtistWithPhone[] = [...(firstPage?.items ?? [])];
+  let cursor = firstPage?.cursor ?? null;
+
+  while (cursor) {
+    const nextPageQuery = `
+      query {
+        next_items_page(limit: 500, cursor: "${cursor}") {
+          cursor
+          items {
+            id
+            name
+            column_values(ids: ${columnIds}) {
+              id
+              text
+              value
+            }
+          }
+        }
+      }
+    `;
+    const nextData = await mondayQuery<{
+      next_items_page: { cursor?: string | null; items: ArtistWithPhone[] };
+    }>(nextPageQuery);
+    items.push(...(nextData.next_items_page?.items ?? []));
+    cursor = nextData.next_items_page?.cursor ?? null;
+  }
+
+  return items;
 }
 
 export async function POST(request: NextRequest) {

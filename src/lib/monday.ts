@@ -29,6 +29,7 @@ export interface MondayItem {
 
 export interface MondayBoard {
   items_page: {
+    cursor?: string | null;
     items: MondayItem[];
   };
 }
@@ -483,14 +484,16 @@ export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
 export const STATUS_ASSIGNMENT_DONE = "הסתיים השיבוץ";
 
 export async function getAllArtists() {
-  const query = `
+  const columnIds = `["text_mm18xbdq", "text_mm18d6vn", "color_mm18btbr", "color_mm18wjry", "${ARTIST_LOCATION_COLUMN_ID}"]`;
+  const firstPageQuery = `
     query {
       boards(ids: [${BOARDS.ARTISTS}]) {
         items_page(limit: 500) {
+          cursor
           items {
             id
             name
-            column_values(ids: ["text_mm18xbdq", "text_mm18d6vn", "color_mm18btbr", "color_mm18wjry", "${ARTIST_LOCATION_COLUMN_ID}"]) {
+            column_values(ids: ${columnIds}) {
               id
               text
               value
@@ -501,8 +504,34 @@ export async function getAllArtists() {
     }
   `;
 
-  const data = await mondayQuery<{ boards: MondayBoard[] }>(query);
-  return data.boards[0]?.items_page?.items ?? [];
+  const data = await mondayQuery<{ boards: MondayBoard[] }>(firstPageQuery);
+  const firstPage = data.boards[0]?.items_page;
+  const items: MondayItem[] = [...(firstPage?.items ?? [])];
+  let cursor = firstPage?.cursor ?? null;
+
+  while (cursor) {
+    const nextPageQuery = `
+      query {
+        next_items_page(limit: 500, cursor: "${cursor}") {
+          cursor
+          items {
+            id
+            name
+            column_values(ids: ${columnIds}) {
+              id
+              text
+              value
+            }
+          }
+        }
+      }
+    `;
+    const nextData = await mondayQuery<{ next_items_page: { cursor?: string | null; items: MondayItem[] } }>(nextPageQuery);
+    items.push(...(nextData.next_items_page?.items ?? []));
+    cursor = nextData.next_items_page?.cursor ?? null;
+  }
+
+  return items;
 }
 
 /** Artists board column for tax status: "מורשה" or "פטור" */
@@ -512,22 +541,16 @@ export const ARTIST_TAX_STATUS_COLUMN_ID = "color_mm1axnas";
 export async function getArtistTaxStatus(artistId: number): Promise<"מורשה" | "פטור" | ""> {
   const query = `
     query {
-      boards(ids: [${BOARDS.ARTISTS}]) {
-        items_page(limit: 500) {
-          items {
-            id
-            column_values(ids: ["${ARTIST_TAX_STATUS_COLUMN_ID}"]) {
-              id
-              text
-            }
-          }
+      items(ids: [${artistId}]) {
+        column_values(ids: ["${ARTIST_TAX_STATUS_COLUMN_ID}"]) {
+          id
+          text
         }
       }
     }
   `;
-  const data = await mondayQuery<{ boards: MondayBoard[] }>(query);
-  const items = data.boards[0]?.items_page?.items ?? [];
-  const artist = items.find((item) => item.id === String(artistId));
+  const data = await mondayQuery<{ items: MondayItem[] }>(query);
+  const artist = data.items?.[0];
   if (!artist) return "";
   const col = getColumnValue(artist, ARTIST_TAX_STATUS_COLUMN_ID);
   const label = (col?.text || "").trim();
