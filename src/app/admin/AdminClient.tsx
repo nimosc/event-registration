@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import * as XLSX from "xlsx";
 import NavBar from "@/components/NavBar";
 import RegistrantsList, { Registrant } from "@/components/RegistrantsList";
 import { SessionUser } from "@/lib/auth";
@@ -252,8 +253,50 @@ function OrderAccordion({
   ) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const titleParts = [order.location, formatDateDDMMYYYY(order.date)].filter(Boolean);
   const orderTitle = titleParts.length > 0 ? titleParts.join(" | ") : order.name;
+
+  async function handleDownloadExcel(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(`/api/admin/orders/export?orderId=${order.id}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "שגיאה");
+
+      const wb = XLSX.utils.book_new();
+      const ws_data: (string | number)[][] = [];
+
+      // Event info rows
+      ws_data.push(["שם אירוע", order.name]);
+      ws_data.push(["תאריך", formatDate(order.date)]);
+      if (order.location) ws_data.push(["מיקום", order.location]);
+      if (order.activityHours) ws_data.push(["שעות פעילות", order.activityHours]);
+      ws_data.push(["סטטוס", order.status]);
+      ws_data.push(["נדרשים", order.requiredCount]);
+      ws_data.push(["נרשמו", order.assignedCount]);
+      ws_data.push([]);
+      // Header row
+      ws_data.push(["שם", "טלפון", "תפקיד", "סטטוס מועמדות", "סטטוס הגעה"]);
+      // Registrant rows
+      for (const r of data.registrants ?? []) {
+        ws_data.push([r.name, r.phone, r.role, r.candidacyStatus, r.attendanceStatus]);
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+      ws["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(wb, ws, "נרשמים");
+
+      const safeTitle = orderTitle.replace(/[\/\\:*?"<>|]/g, "_");
+      XLSX.writeFile(wb, `${safeTitle}.xlsx`);
+    } catch (err) {
+      alert("שגיאה בהורדת האקסל: " + (err instanceof Error ? err.message : "שגיאה לא ידועה"));
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   const registrants: Registrant[] = order.subitems.map((sub) => ({
     id: sub.id,
@@ -299,8 +342,8 @@ function OrderAccordion({
         : "border border-gray-200 hover:border-gray-300"
     }`}>
       {/* Order header - clickable */}
-      <button
-        className="w-full text-right p-5 hover:bg-gray-50 transition-colors"
+      <div
+        className="w-full text-right p-5 hover:bg-gray-50 transition-colors cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-start gap-4">
@@ -384,13 +427,40 @@ function OrderAccordion({
             {/* Progress */}
             {order.requiredCount > 0 && (
               <div>
-                <div className="flex justify-between text-xs text-gray-500 mb-1">
-                  <span>
-                    {order.assignedCount} / {order.requiredCount} אמנים
-                  </span>
-                  <span>
-                    {confirmedCount} מאושרים
-                  </span>
+                <div className="flex gap-2 flex-wrap mb-2">
+                  <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1 text-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                    <span className="text-gray-500">נדרשים</span>
+                    <span className="font-semibold text-gray-700">{order.requiredCount}</span>
+                  </div>
+                  <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${
+                    order.assignedCount >= order.requiredCount
+                      ? "bg-green-50 border border-green-200"
+                      : "bg-blue-50 border border-blue-200"
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      order.assignedCount >= order.requiredCount ? "bg-green-500" : "bg-blue-400"
+                    }`} />
+                    <span className={order.assignedCount >= order.requiredCount ? "text-green-600" : "text-blue-600"}>נרשמו</span>
+                    <span className={`font-semibold ${order.assignedCount >= order.requiredCount ? "text-green-700" : "text-blue-700"}`}>{order.assignedCount}</span>
+                  </div>
+                  <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${
+                    confirmedCount >= order.requiredCount
+                      ? "bg-green-50 border border-green-200"
+                      : confirmedCount > 0
+                        ? "bg-emerald-50 border border-emerald-200"
+                        : "bg-gray-50 border border-gray-200"
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      confirmedCount >= order.requiredCount ? "bg-green-500" : confirmedCount > 0 ? "bg-emerald-400" : "bg-gray-300"
+                    }`} />
+                    <span className={
+                      confirmedCount >= order.requiredCount ? "text-green-600" : confirmedCount > 0 ? "text-emerald-600" : "text-gray-500"
+                    }>מאושרים</span>
+                    <span className={`font-semibold ${
+                      confirmedCount >= order.requiredCount ? "text-green-700" : confirmedCount > 0 ? "text-emerald-700" : "text-gray-500"
+                    }`}>{confirmedCount}</span>
+                  </div>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-1.5">
                   <div
@@ -405,6 +475,23 @@ function OrderAccordion({
           </div>
 
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            <button
+              onClick={handleDownloadExcel}
+              disabled={downloading}
+              title="הורדת אקסל"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors disabled:opacity-50"
+            >
+              {downloading ? (
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              )}
+              אקסל
+            </button>
             <span className="text-xs text-gray-500 flex items-center gap-1">
               {candidateTargetCount} מועמדים צריך
             </span>
@@ -425,7 +512,7 @@ function OrderAccordion({
             </svg>
           </div>
         </div>
-      </button>
+      </div>
 
       {/* Registrants list */}
       {expanded && (
