@@ -104,31 +104,29 @@ export async function PATCH(request: NextRequest) {
           await updateOrderStatus(orderId, STATUS_CANDIDACY_CLOSED);
         }
 
-        if (action === "confirm") {
-          const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
-          if (webhookUrl) {
-            const registration = orderDto.subitems.find((s) => s.id === subitemId);
-            if (registration) {
-              const firstArtistId = registration.linkedArtistIds[0];
-              const artist =
-                firstArtistId != null
-                  ? await getArtistByIdBasic(String(firstArtistId))
-                  : null;
+        const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
+        if (webhookUrl) {
+          const registration = orderDto.subitems.find((s) => s.id === subitemId);
+          if (registration) {
+            const firstArtistId = registration.linkedArtistIds[0];
+            const artist =
+              firstArtistId != null
+                ? await getArtistByIdBasic(String(firstArtistId))
+                : null;
 
-              await postJsonWebhookOrLog(webhookUrl, {
-                event: "candidacy_approved",
-                approvedAt: new Date().toISOString(),
-                admin: { id: session.id, name: session.name },
-                order: orderDto,
-                registration,
-                artist,
-              });
-            } else {
-              console.error(
-                "[Webhook] candidacy approved: subitem not in snapshot",
-                subitemId
-              );
-            }
+            await postJsonWebhookOrLog(webhookUrl, {
+              event: action === "confirm" ? "candidacy_approved" : "candidacy_rejected",
+              decidedAt: new Date().toISOString(),
+              admin: { id: session.id, name: session.name },
+              order: orderDto,
+              registration,
+              artist,
+            });
+          } else {
+            console.error(
+              "[Webhook] candidacy decision: subitem not in snapshot",
+              subitemId
+            );
           }
         }
       }
