@@ -190,6 +190,12 @@ export async function POST(request: NextRequest) {
 
     const phoneColumnId = await resolvePhoneColumnId();
     const artists = await getArtistsWithPhoneColumn(phoneColumnId);
+    console.log(`[account-recovery] phoneColumnId=${phoneColumnId} totalArtists=${artists.length} inputVariants=${JSON.stringify(inputVariants)}`);
+    const sample = artists.slice(0, 3).map((a) => {
+      const col = getColumnValue(a, phoneColumnId);
+      return { name: a.name, text: col?.text, value: col?.value };
+    });
+    console.log(`[account-recovery] sample:`, JSON.stringify(sample));
 
     const matchedArtists = artists.filter((item) => {
       const phoneCol = getColumnValue(item, phoneColumnId);
