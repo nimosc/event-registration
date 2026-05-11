@@ -73,7 +73,13 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-type AssignableArtist = { id: string; name: string };
+type AssignableArtist = { id: string; name: string; phone: string };
+
+function normalizePhone(phone: string): string {
+  let p = (phone || "").replace(/[\s\-\(\)\.]/g, "");
+  p = p.replace(/^\+972/, "0").replace(/^972/, "0");
+  return p;
+}
 
 function AssignArtistControls({
   orderId,
@@ -88,9 +94,13 @@ function AssignArtistControls({
   const [selectedArtistId, setSelectedArtistId] = useState<string>("");
   const [assigning, setAssigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    if (!modalOpen) return;
+    if (!modalOpen) {
+      setSearchQuery("");
+      return;
+    }
 
     let cancelled = false;
     async function load() {
@@ -103,13 +113,24 @@ function AssignArtistControls({
           setError(data.error || "שגיאה בטעינת האומנים");
           return;
         }
-        const list: AssignableArtist[] = Array.isArray(data.artists)
-          ? data.artists.map((a: any) => ({ id: String(a.id), name: String(a.name) }))
+        const raw: AssignableArtist[] = Array.isArray(data.artists)
+          ? data.artists.map((a: any) => ({ id: String(a.id), name: String(a.name), phone: String(a.phone || "") }))
           : [];
+
+        // Deduplicate by normalized phone
+        const seen = new Set<string>();
+        const deduped = raw.filter((a) => {
+          const normalized = normalizePhone(a.phone);
+          if (!normalized || normalized.length < 7) return true;
+          if (seen.has(normalized)) return false;
+          seen.add(normalized);
+          return true;
+        });
+
         if (cancelled) return;
-        setArtists(list);
+        setArtists(deduped);
         setSelectedArtistId((prev) =>
-          prev && list.some((a) => a.id === prev) ? prev : list[0]?.id ?? ""
+          prev && deduped.some((a) => a.id === prev) ? prev : deduped[0]?.id ?? ""
         );
       } catch {
         if (!cancelled) setError("שגיאת רשת בטעינת האומנים");
@@ -122,6 +143,15 @@ function AssignArtistControls({
       cancelled = true;
     };
   }, [modalOpen, orderId]);
+
+  const filteredArtists = searchQuery.trim()
+    ? artists.filter((a) => {
+        const q = searchQuery.trim();
+        if (a.name.includes(q)) return true;
+        const normalizedQ = normalizePhone(q);
+        return normalizedQ.length >= 3 && normalizePhone(a.phone).includes(normalizedQ);
+      })
+    : artists;
 
   async function handleAssign() {
     if (!selectedArtistId) return;
@@ -158,30 +188,35 @@ function AssignArtistControls({
             setModalOpen(true);
           }}
           disabled={assigning}
-          className="btn-primary whitespace-nowrap"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 whitespace-nowrap"
         >
-          שיבוץ
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          שיבוץ ידני
         </button>
       </div>
 
       {modalOpen && (
         <div
-          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
           onClick={() => setModalOpen(false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-gray-200"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-gray-200 flex flex-col"
+            style={{ maxHeight: "80vh" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3 mb-4">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-gray-100 flex-shrink-0">
               <div>
-                <h4 className="text-lg font-semibold text-gray-900">שיבוץ אומן</h4>
-                <p className="text-sm text-gray-500 mt-1">בחר אומן פעיל לשיבוץ להזמנה</p>
+                <h4 className="text-lg font-semibold text-gray-900">שיבוץ ידני</h4>
+                <p className="text-sm text-gray-500 mt-0.5">בחר אומן פעיל לשיבוץ להזמנה</p>
               </div>
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
-                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
                 aria-label="סגור"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -190,43 +225,108 @@ function AssignArtistControls({
               </button>
             </div>
 
-            {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
+            {/* Body */}
+            <div className="px-6 py-4 flex flex-col gap-3 overflow-hidden flex-1 min-h-0">
+              {error && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-lg">{error}</p>
+              )}
 
-            {optionsLoading ? (
-              <div>
-                <div className="h-11 bg-gray-100 rounded-xl animate-pulse border border-gray-50" />
-                <div className="h-11 bg-gray-100 rounded-xl animate-pulse border border-gray-50 mt-3" />
-              </div>
-            ) : artists.length === 0 ? (
-              <p className="text-sm text-gray-500">אין אומנים פעילים זמינים לשיבוץ להזמנה הזו.</p>
-            ) : (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">אומן פעיל</label>
-                <select
-                  value={selectedArtistId}
-                  onChange={(e) => setSelectedArtistId(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {artists.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+              {optionsLoading ? (
+                <div className="flex flex-col items-center justify-center py-14 gap-3">
+                  <svg className="w-8 h-8 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <p className="text-sm text-gray-400">טוען רשימת אומנים...</p>
+                </div>
+              ) : artists.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-10">אין אומנים פעילים זמינים לשיבוץ להזמנה הזו.</p>
+              ) : (
+                <>
+                  {/* Search */}
+                  <div className="relative flex-shrink-0">
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </div>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="חיפוש לפי שם או טלפון..."
+                      className="w-full border border-gray-200 rounded-xl pr-9 pl-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      autoFocus
+                    />
+                  </div>
 
-            <div className="flex gap-2 justify-end mt-5">
+                  {/* Artist list */}
+                  <div className="overflow-y-auto flex-1 -mx-1 px-1">
+                    {filteredArtists.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-8">לא נמצאו תוצאות</p>
+                    ) : (
+                      <div className="space-y-0.5">
+                        {filteredArtists.map((a) => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => setSelectedArtistId(a.id)}
+                            className={`w-full text-right px-3 py-2.5 rounded-xl flex items-center gap-3 transition-colors ${
+                              selectedArtistId === a.id
+                                ? "bg-blue-50 border border-blue-200"
+                                : "hover:bg-gray-50 border border-transparent"
+                            }`}
+                          >
+                            <div
+                              className={`w-2.5 h-2.5 rounded-full flex-shrink-0 border-2 transition-colors ${
+                                selectedArtistId === a.id
+                                  ? "bg-blue-500 border-blue-500"
+                                  : "bg-white border-gray-300"
+                              }`}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-gray-800 truncate">{a.name}</div>
+                              {a.phone && (
+                                <div className="text-xs text-gray-400 truncate mt-0.5">{a.phone}</div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-gray-400 text-center flex-shrink-0">
+                    {filteredArtists.length !== artists.length
+                      ? `${filteredArtists.length} מתוך ${artists.length} אומנים`
+                      : `${artists.length} אומנים`}
+                  </p>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex gap-2 justify-end px-6 py-4 border-t border-gray-100 flex-shrink-0">
               <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">
                 ביטול
               </button>
               <button
                 type="button"
                 onClick={handleAssign}
-                disabled={!selectedArtistId || assigning || optionsLoading || artists.length === 0}
-                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!selectedArtistId || assigning || optionsLoading || filteredArtists.length === 0}
+                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                {assigning ? "שיבוץ..." : "שיבוץ"}
+                {assigning ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    משבץ...
+                  </>
+                ) : (
+                  "שיבוץ"
+                )}
               </button>
             </div>
           </div>

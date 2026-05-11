@@ -484,8 +484,10 @@ export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
 export const STATUS_ASSIGNMENT_DONE = "הסתיים השיבוץ";
 export const STATUS_CANCELLED = "בוטל";
 
-export async function getAllArtists() {
-  const columnIds = `["text_mm18xbdq", "text_mm18d6vn", "color_mm18btbr", "color_mm18wjry", "${ARTIST_LOCATION_COLUMN_ID}"]`;
+export async function getAllArtists(extraColumnIds: string[] = []) {
+  const baseIds = ["text_mm18xbdq", "text_mm18d6vn", "color_mm18btbr", "color_mm18wjry", ARTIST_LOCATION_COLUMN_ID];
+  const allIds = extraColumnIds.length > 0 ? [...new Set([...baseIds, ...extraColumnIds])] : baseIds;
+  const columnIds = JSON.stringify(allIds);
   const firstPageQuery = `
     query {
       boards(ids: [${BOARDS.ARTISTS}]) {
