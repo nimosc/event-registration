@@ -16,6 +16,7 @@ import {
   STATUS_OPEN,
   STATUS_CANDIDACY_CLOSED,
   STATUS_ASSIGNMENT_DONE,
+  STATUS_CANCELLED,
   CANDIDACY_STATUS_COLUMN_ID,
   BOARDS,
 } from "@/lib/monday";
@@ -51,8 +52,8 @@ export async function POST(request: NextRequest) {
 
     const statusCol = getColumnValue(order, "color_mm18ej76");
     const orderStatus = statusCol?.text || "";
-    if (orderStatus !== STATUS_OPEN) {
-      return NextResponse.json({ error: "הזמנה לא פתוחה לשיבוץ" }, { status: 400 });
+    if (orderStatus === STATUS_CANCELLED) {
+      return NextResponse.json({ error: "לא ניתן לשבץ להזמנה שבוטלה" }, { status: 400 });
     }
 
     const requiredCol = getColumnValue(order, "numeric_mm185aw7");
