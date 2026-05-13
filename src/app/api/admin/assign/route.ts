@@ -62,9 +62,6 @@ export async function POST(request: NextRequest) {
     const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
 
     const capacityLimit = requiredCount > 0 ? Math.ceil(requiredCount * 1.5) : 0;
-    if (capacityLimit > 0 && assignedCount >= capacityLimit) {
-      return NextResponse.json({ error: "הזמנה מלאה" }, { status: 400 });
-    }
 
     // prevent duplicates for this artist
     const artistIdNum = parseInt(artistId, 10);
