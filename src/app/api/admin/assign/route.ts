@@ -9,6 +9,7 @@ import {
   updateAssignedCount,
   updateOrderStatus,
   getOrderById,
+  getOrderAdminSnapshotById,
   getArtistByIdBasic,
   updateCandidacyConfirmation,
   mapInternalCandidacyToMonday,
@@ -20,6 +21,7 @@ import {
   CANDIDACY_STATUS_COLUMN_ID,
   BOARDS,
 } from "@/lib/monday";
+import { postJsonWebhookOrLog } from "@/lib/webhook";
 
 export async function POST(request: NextRequest) {
   try {
@@ -95,6 +97,26 @@ export async function POST(request: NextRequest) {
 
       if (requiredCount2 > 0 && confirmedCount >= requiredCount2) {
         await updateOrderStatus(orderId, STATUS_ASSIGNMENT_DONE);
+      }
+    }
+
+    const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
+    if (webhookUrl) {
+      const orderSnapshot = await getOrderAdminSnapshotById(orderId);
+      if (orderSnapshot) {
+        const registration = orderSnapshot.subitems.find((s) => s.id === subitem.id);
+        if (registration) {
+          const firstArtistId = registration.linkedArtistIds[0];
+          const artist = firstArtistId != null ? await getArtistByIdBasic(String(firstArtistId)) : null;
+          await postJsonWebhookOrLog(webhookUrl, {
+            event: "candidacy_approved",
+            decidedAt: new Date().toISOString(),
+            admin: { id: session.id, name: session.name },
+            order: orderSnapshot,
+            registration,
+            artist,
+          });
+        }
       }
     }
 
