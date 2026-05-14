@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     }
 
     const roleCol = artist.column_values.find((cv) => cv.id === "color_mm18btbr");
-    const role: SessionUser["role"] = roleCol?.text === "מנהל" ? "מנהל" : "אומן";
+    const role: SessionUser["role"] = roleCol?.text === "מנהל" ? "מנהל" : roleCol?.text === "ODT" ? "ODT" : "אומן";
 
     const locationCol = artist.column_values.find((cv) => cv.id === ARTIST_LOCATION_COLUMN_ID);
 

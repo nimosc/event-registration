@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     const roleCol = getColumnValue(artist, "color_mm18btbr");
     const roleLabel = roleCol?.text || "";
     const role: SessionUser["role"] =
-      roleLabel === "מנהל" ? "מנהל" : "אומן";
+      roleLabel === "מנהל" ? "מנהל" : roleLabel === "ODT" ? "ODT" : "אומן";
 
     const locationCol = getColumnValue(artist, ARTIST_LOCATION_COLUMN_ID);
     const location =

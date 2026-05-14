@@ -388,6 +388,32 @@ export async function getArtistByIdBasic(
   return { id: artist.id, name: artist.name, statusText };
 }
 
+export async function getLiveArtistRole(
+  artistId: string
+): Promise<"אומן" | "מנהל" | "ODT" | null> {
+  const query = `
+    query {
+      items(ids: [${artistId}]) {
+        board { id }
+        column_values(ids: ["color_mm18btbr"]) {
+          text
+        }
+      }
+    }
+  `;
+  try {
+    const data = await mondayQuery<{ items: { board?: { id: string }; column_values: { text: string }[] }[] }>(query);
+    const item = data.items?.[0];
+    if (!item || item.board?.id !== String(BOARDS.ARTISTS)) return null;
+    const label = (item.column_values?.[0]?.text || "").trim();
+    if (label === "מנהל") return "מנהל";
+    if (label === "ODT") return "ODT";
+    return "אומן";
+  } catch {
+    return null;
+  }
+}
+
 export function parseLinkedItemIds(value: string | null | undefined): number[] {
   if (!value) return [];
   try {
@@ -479,6 +505,10 @@ export const ORDER_LOCATION_COLUMN_ID = "dropdown_mm1qvq5q";
 /** שעות פעילות — טקסט על פריט הזמנה */
 export const ORDER_ACTIVITY_HOURS_COLUMN_ID = "text_mm2b57xq";
 export const ARTIST_ACTIVE_STATUS_COLUMN_ID = "color_mm18wjry";
+export const ODT_REQUIRED_COLUMN_ID = "numeric_mm387qc7";
+export const ODT_ASSIGNED_COLUMN_ID = "numeric_mm3b6rnr";
+export const ARTIST_REQUIRED_COLUMN_ID = "numeric_mm185aw7";
+export const ARTIST_ASSIGNED_COLUMN_ID = "numeric_mm18d914";
 export const STATUS_OPEN = "בתהליך שיבוץ";
 export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
 export const STATUS_ASSIGNMENT_DONE = "הסתיים השיבוץ";
@@ -571,7 +601,7 @@ export async function getOpenOrders() {
           items {
             id
             name
-            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ORDER_LOCATION_COLUMN_ID}", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
+            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ODT_REQUIRED_COLUMN_ID}", "${ODT_ASSIGNED_COLUMN_ID}", "${ORDER_LOCATION_COLUMN_ID}", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
               id
               text
               value
@@ -605,7 +635,7 @@ export async function getAllOrders() {
           items {
             id
             name
-            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
+            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ODT_REQUIRED_COLUMN_ID}", "${ODT_ASSIGNED_COLUMN_ID}", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
               id
               text
               value
@@ -613,7 +643,7 @@ export async function getAllOrders() {
             subitems {
               id
               name
-              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}"]) {
+              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3bjfvg"]) {
                 id
                 text
                 value
@@ -635,6 +665,7 @@ export interface AdminOrderSubitem {
   name: string;
   linkedArtistIds: number[];
   role: string;
+  artistType: string;
   attendanceStatus: string;
   candidacyStatus: string;
   hasCandidacyDateConflict?: boolean;
@@ -650,6 +681,7 @@ export interface AdminOrderDto {
   activityHours: string;
   status: string;
   requiredCount: number;
+  requiredOdtCount: number;
   assignedCount: number;
   spotsRemaining: number;
   subitems: AdminOrderSubitem[];
@@ -786,10 +818,40 @@ export function withCandidacyDateConflictFlags(orders: AdminOrderDto[]): AdminOr
   });
 }
 
+function buildArtistTypeMaps(artists: MondayItem[]): {
+  byId: Map<string, string>;
+  byName: Map<string, string>;
+} {
+  const byId = new Map<string, string>();
+  const byName = new Map<string, string>();
+  for (const artist of artists) {
+    const roleCol = artist.column_values?.find((cv) => cv.id === "color_mm18btbr");
+    const label = (roleCol?.text || "").trim();
+    const type = label === "ODT" ? "ODT" : "אומן";
+    byId.set(String(artist.id), type);
+    const nameKey = (artist.name || "").trim().replace(/\s+/g, " ").toLowerCase();
+    if (nameKey && !byName.has(nameKey)) byName.set(nameKey, type);
+  }
+  return { byId, byName };
+}
+
 export async function getAllOrdersWithCandidacyDateConflicts(): Promise<AdminOrderDto[]> {
-  const items = await getAllOrders();
+  const [items, artists] = await Promise.all([getAllOrders(), getAllArtists()]);
+  const { byId: artistTypeById, byName: artistTypeByName } = buildArtistTypeMaps(artists);
   const orders = items.map((item) => mapMondayOrderItemToAdminOrder(item));
   const withFlags = withCandidacyDateConflictFlags(orders);
+  const withTypes = withFlags.map((order) => ({
+    ...order,
+    subitems: order.subitems.map((sub) => {
+      if (sub.artistType) return sub;
+      const byId = sub.linkedArtistIds[0] != null
+        ? artistTypeById.get(String(sub.linkedArtistIds[0]))
+        : undefined;
+      const nameKey = (sub.name || "").trim().replace(/\s+/g, " ").toLowerCase();
+      const byName = nameKey ? artistTypeByName.get(nameKey) : undefined;
+      return { ...sub, artistType: byId ?? byName ?? "" };
+    }),
+  }));
   // #region agent log
   console.log("[DBG H4] ordersWithConflicts", {
     ordersCount: withFlags.length,
@@ -808,8 +870,8 @@ export async function getAllOrdersWithCandidacyDateConflicts(): Promise<AdminOrd
       location: "src/lib/monday.ts:getAllOrdersWithCandidacyDateConflicts",
       message: "Computed orders with conflict flags summary",
       data: {
-        ordersCount: withFlags.length,
-        flaggedSubitemsCount: withFlags.reduce(
+        ordersCount: withTypes.length,
+        flaggedSubitemsCount: withTypes.reduce(
           (sum, o) => sum + o.subitems.filter((s) => s.hasCandidacyDateConflict).length,
           0
         ),
@@ -818,7 +880,7 @@ export async function getAllOrdersWithCandidacyDateConflicts(): Promise<AdminOrd
     }),
   }).catch(() => {});
   // #endregion
-  return withFlags;
+  return withTypes;
 }
 
 export async function getCandidacyDateConflictForSubitem(
@@ -881,10 +943,13 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
   const locationCol = getColumnValue(item, "text_mm1894y7");
   const activityHoursCol = getColumnValue(item, ORDER_ACTIVITY_HOURS_COLUMN_ID);
   const requiredCol = getColumnValue(item, "numeric_mm185aw7");
+  const requiredOdtCol = getColumnValue(item, ODT_REQUIRED_COLUMN_ID);
   const assignedCol = getColumnValue(item, "numeric_mm18d914");
 
   const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
+  const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
   const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
+  const totalRequired = requiredCount + requiredOdtCount;
 
   const subitems = (item.subitems || []).map((sub) => {
     const relationCol = sub.column_values.find(
@@ -895,6 +960,7 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
     const candidacyCol = sub.column_values.find(
       (cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID
     );
+    const artistTypeCol = sub.column_values.find((cv) => cv.id === "color_mm3bjfvg");
 
     const linkedArtistIds = parseLinkedItemIds(relationCol?.value);
     const mapped = {
@@ -902,6 +968,7 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
       name: sub.name,
       linkedArtistIds,
       role: roleCol?.text || "",
+      artistType: (artistTypeCol?.text || "").trim(),
       attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
       candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
     };
@@ -952,19 +1019,20 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
     activityHours: (activityHoursCol?.text || "").trim(),
     status: statusCol?.text || "",
     requiredCount,
+    requiredOdtCount,
     assignedCount,
-    spotsRemaining: Math.max(0, requiredCount - assignedCount),
+    spotsRemaining: Math.max(0, totalRequired - assignedCount),
     subitems,
   };
 }
 
-const ADMIN_ORDER_ITEM_COLUMNS = `column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
+const ADMIN_ORDER_ITEM_COLUMNS = `column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ODT_REQUIRED_COLUMN_ID}", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
           id
           text
           value
         }`;
 
-const ADMIN_ORDER_SUBITEM_COLUMNS = `column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}"]) {
+const ADMIN_ORDER_SUBITEM_COLUMNS = `column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3bjfvg"]) {
             id
             text
             value
@@ -1094,14 +1162,15 @@ export async function deleteSubitem(subitemId: string): Promise<{ id: string }> 
 
 export async function updateAssignedCount(
   orderId: string,
-  count: number
+  count: number,
+  columnId: string = ARTIST_ASSIGNED_COLUMN_ID
 ): Promise<void> {
   const query = `
     mutation {
       change_column_value(
         board_id: ${BOARDS.ORDERS},
         item_id: ${orderId},
-        column_id: "numeric_mm18d914",
+        column_id: "${columnId}",
         value: "${count}"
       ) {
         id
@@ -1208,7 +1277,7 @@ export interface IssueReportInput {
   title: string;
   description: string;
   reporterName: string;
-  reporterRole: "אומן" | "מנהל";
+  reporterRole: "אומן" | "מנהל" | "ODT";
   path?: string;
 }
 

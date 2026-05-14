@@ -88,14 +88,17 @@ export async function POST(request: NextRequest) {
     const updatedOrder = await getOrderById(orderId);
     if (updatedOrder) {
       const requiredCol2 = getColumnValue(updatedOrder, "numeric_mm185aw7");
+      const requiredOdtCol2 = getColumnValue(updatedOrder, "numeric_mm387qc7");
       const requiredCount2 = parseFloat(requiredCol2?.text || "0") || 0;
+      const requiredOdtCount2 = parseFloat(requiredOdtCol2?.text || "0") || 0;
+      const totalRequired2 = requiredCount2 + requiredOdtCount2;
       const mondayApproved = mapInternalCandidacyToMonday("מאושר");
       const confirmedCount = (updatedOrder.subitems || []).filter((sub) => {
         const candidacyCol = sub.column_values.find((cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID);
         return candidacyCol?.text === mondayApproved;
       }).length;
 
-      if (requiredCount2 > 0 && confirmedCount >= requiredCount2) {
+      if (totalRequired2 > 0 && confirmedCount >= totalRequired2) {
         await updateOrderStatus(orderId, STATUS_ASSIGNMENT_DONE);
       }
     }

@@ -36,6 +36,7 @@ interface AdminOrder {
   activityHours?: string;
   status: string;
   requiredCount: number;
+  requiredOdtCount: number;
   assignedCount: number;
   spotsRemaining: number;
   subitems: {
@@ -43,6 +44,7 @@ interface AdminOrder {
     name: string;
     linkedArtistIds: number[];
     role: string;
+    artistType: string;
     attendanceStatus: string;
     candidacyStatus?: string;
     hasCandidacyDateConflict?: boolean;
@@ -402,15 +404,17 @@ function OrderAccordion({
     id: sub.id,
     name: sub.name,
     role: sub.role,
+    artistType: sub.artistType,
     attendanceStatus: sub.attendanceStatus,
     candidacyStatus: sub.candidacyStatus,
     hasCandidacyDateConflict: sub.hasCandidacyDateConflict,
     candidacyDateConflictMessage: sub.candidacyDateConflictMessage,
   }));
 
+  const totalRequired = order.requiredCount + order.requiredOdtCount;
   const filledPercent =
-    order.requiredCount > 0
-      ? Math.min(100, (order.assignedCount / order.requiredCount) * 100)
+    totalRequired > 0
+      ? Math.min(100, (order.assignedCount / totalRequired) * 100)
       : 0;
 
   const confirmedCount =
@@ -525,40 +529,51 @@ function OrderAccordion({
             </div>
 
             {/* Progress */}
-            {order.requiredCount > 0 && (
+            {(order.requiredCount > 0 || order.requiredOdtCount > 0) && (
               <div>
                 <div className="flex gap-2 flex-wrap mb-2">
-                  <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1 text-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                    <span className="text-gray-500">נדרשים</span>
-                    <span className="font-semibold text-gray-700">{order.requiredCount}</span>
-                  </div>
+                  {order.requiredCount > 0 && (
+                    <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1 text-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                      <span className="text-gray-500">אומנים נדרשים</span>
+                      <span className="font-semibold text-gray-700">{order.requiredCount}</span>
+                    </div>
+                  )}
+                  {order.requiredOdtCount > 0 && (
+                    <div className="flex items-center gap-1.5 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1 text-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                      <span className="text-purple-600">ODT נדרשים</span>
+                      <span className="font-semibold text-purple-700">{order.requiredOdtCount}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-wrap mb-2">
                   <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${
-                    order.assignedCount >= order.requiredCount
+                    order.assignedCount >= totalRequired
                       ? "bg-green-50 border border-green-200"
                       : "bg-blue-50 border border-blue-200"
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${
-                      order.assignedCount >= order.requiredCount ? "bg-green-500" : "bg-blue-400"
+                      order.assignedCount >= totalRequired ? "bg-green-500" : "bg-blue-400"
                     }`} />
-                    <span className={order.assignedCount >= order.requiredCount ? "text-green-600" : "text-blue-600"}>נרשמו</span>
-                    <span className={`font-semibold ${order.assignedCount >= order.requiredCount ? "text-green-700" : "text-blue-700"}`}>{order.assignedCount}</span>
+                    <span className={order.assignedCount >= totalRequired ? "text-green-600" : "text-blue-600"}>נרשמו</span>
+                    <span className={`font-semibold ${order.assignedCount >= totalRequired ? "text-green-700" : "text-blue-700"}`}>{order.assignedCount}</span>
                   </div>
                   <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${
-                    confirmedCount >= order.requiredCount
+                    confirmedCount >= totalRequired
                       ? "bg-green-50 border border-green-200"
                       : confirmedCount > 0
                         ? "bg-emerald-50 border border-emerald-200"
                         : "bg-gray-50 border border-gray-200"
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${
-                      confirmedCount >= order.requiredCount ? "bg-green-500" : confirmedCount > 0 ? "bg-emerald-400" : "bg-gray-300"
+                      confirmedCount >= totalRequired ? "bg-green-500" : confirmedCount > 0 ? "bg-emerald-400" : "bg-gray-300"
                     }`} />
                     <span className={
-                      confirmedCount >= order.requiredCount ? "text-green-600" : confirmedCount > 0 ? "text-emerald-600" : "text-gray-500"
+                      confirmedCount >= totalRequired ? "text-green-600" : confirmedCount > 0 ? "text-emerald-600" : "text-gray-500"
                     }>מאושרים</span>
                     <span className={`font-semibold ${
-                      confirmedCount >= order.requiredCount ? "text-green-700" : confirmedCount > 0 ? "text-emerald-700" : "text-gray-500"
+                      confirmedCount >= totalRequired ? "text-green-700" : confirmedCount > 0 ? "text-emerald-700" : "text-gray-500"
                     }`}>{confirmedCount}</span>
                   </div>
                 </div>
@@ -862,9 +877,11 @@ export default function AdminClient({ user }: AdminClientProps) {
       if (!matchesSearch) return false;
 
       if (filterMode === "relevant") {
+        if (order.status.includes("בוטל")) return false;
         return hasPendingConfirmation(order, statusMode) || isUpcoming(order.date);
       }
       if (filterMode === "needs_confirmation") {
+        if (order.status.includes("בוטל")) return false;
         return hasPendingConfirmation(order, statusMode);
       }
       return true; // "all"
@@ -878,10 +895,10 @@ export default function AdminClient({ user }: AdminClientProps) {
       return a.name.localeCompare(b.name, "he");
     });
 
-  const pendingCount = orders.filter((o) => hasPendingConfirmation(o, statusMode)).length;
-  const upcomingCount = orders.filter(o => isUpcoming(o.date)).length;
+  const pendingCount = orders.filter((o) => !o.status.includes("בוטל") && hasPendingConfirmation(o, statusMode)).length;
+  const upcomingCount = orders.filter((o) => !o.status.includes("בוטל") && isUpcoming(o.date)).length;
   const relevantCount = orders.filter(
-    (o) => hasPendingConfirmation(o, statusMode) || isUpcoming(o.date)
+    (o) => !o.status.includes("בוטל") && (hasPendingConfirmation(o, statusMode) || isUpcoming(o.date))
   ).length;
   const totalRegistrants = orders.reduce((sum, o) => sum + o.subitems.length, 0);
 

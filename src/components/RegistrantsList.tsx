@@ -6,6 +6,7 @@ export interface Registrant {
   id: string;
   name: string;
   role: string;
+  artistType: string;
   attendanceStatus: string;
   candidacyStatus?: string;
   hasCandidacyDateConflict?: boolean;
@@ -95,8 +96,14 @@ function RegistrantRow({ registrant, onAction, statusMode }: RegistrantRowProps)
           <p className="text-sm font-medium text-gray-900 truncate">
             {registrant.name}
           </p>
-          {registrant.role && (
-            <p className="text-xs text-gray-500 truncate">{registrant.role}</p>
+          {registrant.artistType && (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-0.5 ${
+              registrant.artistType === "ODT"
+                ? "bg-purple-100 text-purple-700"
+                : "bg-blue-100 text-blue-700"
+            }`}>
+              {registrant.artistType}
+            </span>
           )}
         </div>
       </div>

@@ -7,7 +7,7 @@ import { useRouter, usePathname } from "next/navigation";
 
 interface NavBarProps {
   userName: string;
-  userRole: "אומן" | "מנהל";
+  userRole: "אומן" | "מנהל" | "ODT";
   userLocation?: string;
 }
 

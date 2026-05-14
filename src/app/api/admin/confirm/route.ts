@@ -95,10 +95,11 @@ export async function PATCH(request: NextRequest) {
 
       const orderDto = await getOrderAdminSnapshotById(orderId);
       if (orderDto) {
-        const { requiredCount, status: currentStatus, subitems } = orderDto;
+        const { requiredCount, requiredOdtCount, status: currentStatus, subitems } = orderDto;
+        const totalRequired = requiredCount + (requiredOdtCount ?? 0);
         const confirmedCount = subitems.filter((s) => s.candidacyStatus === "מאושר").length;
 
-        if (action === "confirm" && requiredCount > 0 && confirmedCount >= requiredCount) {
+        if (action === "confirm" && totalRequired > 0 && confirmedCount >= totalRequired) {
           await updateOrderStatus(orderId, STATUS_ASSIGNMENT_DONE);
         } else if (action === "reject" && currentStatus === STATUS_ASSIGNMENT_DONE) {
           await updateOrderStatus(orderId, STATUS_CANDIDACY_CLOSED);

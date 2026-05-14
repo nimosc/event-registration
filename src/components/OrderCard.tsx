@@ -11,6 +11,7 @@ export interface Order {
   orderLocation: string;
   status: string;
   requiredCount: number;
+  odtRequired: number;
   assignedCount: number;
   spotsRemaining: number;
   isRegistered: boolean;
@@ -39,23 +40,46 @@ function formatDateDDMMYYYY(dateStr: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function SpotsBar({ required, assigned, forceDone }: { required: number; assigned: number; forceDone?: boolean }) {
-  if (required <= 0) return null;
-  const capacityLimit = Math.ceil(required * 1.5);
+function SpotsBar({ required, odtRequired, assigned, forceDone }: { required: number; odtRequired: number; assigned: number; forceDone?: boolean }) {
+  const totalRequired = required + odtRequired;
+  if (totalRequired <= 0) return null;
+  const capacityLimit = Math.ceil(totalRequired * 1.5);
   const remaining = capacityLimit - assigned;
   const isClosed = forceDone || remaining <= 0;
-  const isOverRequired = !isClosed && assigned >= required;
+  const isOverRequired = !isClosed && assigned >= totalRequired;
   const isAlmostFull = !isClosed && !isOverRequired && (assigned / capacityLimit) >= 0.75;
   const percent = Math.min(100, (assigned / capacityLimit) * 100);
 
+  const hasBreakdown = required > 0 && odtRequired > 0;
+
   return (
-    <div className="mt-3">
-      <div className="flex justify-between text-xs mb-1.5">
-        <span className="text-gray-500">{assigned} מועמדים / {required} נדרשים</span>
-        <span className={`font-medium ${isClosed ? "text-red-500" : isOverRequired ? "text-orange-500" : isAlmostFull ? "text-orange-400" : "text-gray-500"}`}>
-          {isClosed ? "הסתיים השיבוץ" : `עוד ${remaining} מקומות`}
+    <div className="mt-3 space-y-1.5">
+      {/* Row 1: required count + candidacy spots */}
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-semibold text-gray-700">
+          נדרשים: <span className="text-gray-900">{totalRequired}</span>
+        </span>
+        <span className={`font-medium ${isClosed ? "text-red-500" : isOverRequired ? "text-orange-500" : isAlmostFull ? "text-orange-400" : "text-emerald-600"}`}>
+          {isClosed
+            ? "נסגרה קבלת מועמדויות"
+            : `${remaining} מקומות פתוחים להגשה`}
         </span>
       </div>
+
+      {/* Row 2: breakdown badges (only when both types exist) */}
+      {hasBreakdown && (
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-center bg-violet-100 text-violet-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+            {odtRequired} ODT
+          </span>
+          <span className="text-gray-300 text-xs">+</span>
+          <span className="inline-flex items-center bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+            {required} אומנים
+          </span>
+        </div>
+      )}
+
+      {/* Progress bar */}
       <div className="w-full bg-gray-100 rounded-full h-1.5">
         <div
           className={`h-1.5 rounded-full transition-all duration-300 ${
@@ -63,6 +87,11 @@ function SpotsBar({ required, assigned, forceDone }: { required: number; assigne
           }`}
           style={{ width: `${percent}%` }}
         />
+      </div>
+
+      {/* Row below bar: how many applied */}
+      <div className="text-xs text-gray-400">
+        {assigned} הגישו מועמדות
       </div>
     </div>
   );
@@ -178,7 +207,7 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
         </div>
 
         {/* Spots bar */}
-        <SpotsBar required={order.requiredCount} assigned={order.assignedCount} forceDone={isAssignmentDone} />
+        <SpotsBar required={order.requiredCount} odtRequired={order.odtRequired} assigned={order.assignedCount} forceDone={isAssignmentDone} />
 
         {/* Error */}
         {error && (

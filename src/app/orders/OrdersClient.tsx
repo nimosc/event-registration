@@ -102,6 +102,10 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       const res = await fetch("/api/orders");
       const data = await res.json();
       if (!res.ok) { setError(data.error || "שגיאה בטעינת הזמנות"); return; }
+      if (data.roleRefreshed) {
+        router.refresh();
+        return;
+      }
       const sorted = [...(data.orders ?? [])].sort((a: Order, b: Order) =>
         (a.date || "").localeCompare(b.date || "")
       );
@@ -111,7 +115,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders, lastRefresh]);
 
@@ -252,7 +256,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       o.status !== "הסתיים השיבוץ" &&
       o.status !== "סגירת קבלת מועמדויות" &&
       o.status !== "בוטל" &&
-      (o.requiredCount === 0 || o.spotsRemaining > 0)
+      (o.requiredCount + o.odtRequired === 0 || o.spotsRemaining > 0)
   );
   const closedOrders = filteredOrders.filter(
     (o) =>
@@ -260,7 +264,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       o.status !== "הסתיים השיבוץ" &&
       o.status !== "סגירת קבלת מועמדויות" &&
       o.status !== "בוטל" &&
-      o.requiredCount > 0 &&
+      o.requiredCount + o.odtRequired > 0 &&
       o.spotsRemaining <= 0
   );
 

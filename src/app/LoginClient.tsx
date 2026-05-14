@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
@@ -11,6 +11,7 @@ interface LoginClientProps {
 
 export default function LoginClient({ magicId, inactive }: LoginClientProps) {
   const router = useRouter();
+  const magicLinkFired = useRef(false);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
@@ -45,13 +46,15 @@ export default function LoginClient({ magicId, inactive }: LoginClientProps) {
 
   useEffect(() => {
     if (!magicId) return;
+    if (magicLinkFired.current) return;
+    magicLinkFired.current = true;
     setLoading(true);
     fetch(`/api/magic-link?id=${encodeURIComponent(magicId)}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.success) {
-          router.push(data.user?.role === "מנהל" ? "/admin" : "/orders");
-          router.refresh();
+          const role = data.user?.role;
+          router.push(role === "מנהל" ? "/admin" : "/orders");
         } else {
           setError(data.error || "לינק לא תקין");
           setLoading(false);

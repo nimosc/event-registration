@@ -62,10 +62,13 @@ export async function POST(request: NextRequest) {
     }
 
     const requiredCol = getColumnValue(order, "numeric_mm185aw7");
+    const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
     const assignedCol = getColumnValue(order, "numeric_mm18d914");
     const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
+    const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
     const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
-    const capacityLimit = requiredCount > 0 ? Math.ceil(requiredCount * 1.5) : 0;
+    const totalRequired = requiredCount + requiredOdtCount;
+    const capacityLimit = totalRequired > 0 ? Math.ceil(totalRequired * 1.5) : 0;
 
     // Check if already submitted candidacy
     const artistId = parseInt(session.id, 10);
@@ -160,7 +163,8 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const assignedCol = getColumnValue(order, "numeric_mm18d914");
+    const deleteAssignedColumnId = session.role === "ODT" ? "numeric_mm3b6rnr" : "numeric_mm18d914";
+    const assignedCol = getColumnValue(order, deleteAssignedColumnId);
     const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
 
     // Delete subitem
@@ -168,7 +172,7 @@ export async function DELETE(request: NextRequest) {
 
     // Update assigned count
     const newAssignedCount = Math.max(0, assignedCount - 1);
-    await updateAssignedCount(orderId, newAssignedCount);
+    await updateAssignedCount(orderId, newAssignedCount, deleteAssignedColumnId);
 
     // If order was closed (either status), reopen it
     const statusCol = getColumnValue(order, "color_mm18ej76");
