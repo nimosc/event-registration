@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import OrderCard, { Order } from "@/components/OrderCard";
@@ -55,6 +55,37 @@ function EmptyState({ filtered }: { filtered: boolean }) {
         {filtered ? "נסה לבחור חודש אחר או הצג את כל ההזמנות" : "כרגע אין הזמנות פתוחות להגשת מועמדות. בדוק שוב מאוחר יותר."}
       </p>
     </div>
+  );
+}
+
+function CollapsibleSection({
+  accentColor, label, count, labelColor, countBg, countColor, defaultOpen = false, children,
+}: {
+  accentColor: string; label: string; count: number;
+  labelColor?: string; countBg?: string; countColor?: string;
+  defaultOpen?: boolean; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (count === 0) return null;
+  return (
+    <section>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 mb-4 w-full text-right group"
+      >
+        <div className={`w-1 h-4 ${accentColor} rounded-full flex-shrink-0`} />
+        <h2 className={`text-sm font-semibold uppercase tracking-wide ${labelColor ?? "text-gray-700"}`}>{label}</h2>
+        <svg
+          className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${countBg ?? "bg-gray-100"} ${countColor ?? "text-gray-500"}`}>{count}</span>
+        <span className="flex-1" />
+      </button>
+      {open && children}
+    </section>
   );
 }
 
@@ -182,12 +213,8 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     // Month filter
     if (selectedMonth === "all") return result;
     if (selectedMonth === "upcoming") {
-      const cur = getCurrentMonthKey();
-      const next = getNextMonthKey();
-      return result.filter(o => {
-        const k = parseMonthKey(o.date);
-        return k === cur || k === next;
-      });
+      const today = new Date(new Date().toDateString());
+      return result.filter(o => !o.date || new Date(o.date) >= today);
     }
     return result.filter(o => parseMonthKey(o.date) === selectedMonth);
   }, [orders, selectedMonth, selectedLocation]);
@@ -422,7 +449,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
                         : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
                     }`}
                   >
-                    החודש + הבא
+                    עתידי
                   </button>
                   <button
                     onClick={() => setSelectedMonth("all")}
@@ -502,101 +529,53 @@ export default function OrdersClient({ user }: OrdersClientProps) {
         ) : (
           <div className="space-y-8">
 
-            {/* My candidacies */}
-            {myOrders.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1 h-4 bg-blue-500 rounded-full" />
-                  <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">המועמדויות שלי</h2>
-                  <span className="text-xs bg-blue-100 text-blue-600 font-semibold px-2 py-0.5 rounded-full">{myOrders.length}</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {myOrders.map(order => (
-                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
-                  ))}
-                </div>
-              </section>
-            )}
+            <CollapsibleSection accentColor="bg-blue-500" label="המועמדויות שלי" count={myOrders.length} countBg="bg-blue-100" countColor="text-blue-600">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {myOrders.map(order => (
+                  <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
+                ))}
+              </div>
+            </CollapsibleSection>
 
-            {/* Open for candidacy */}
-            {openOrders.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1 h-4 bg-green-500 rounded-full" />
-                  <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">פתוחות למועמדות</h2>
-                  <span className="text-xs bg-green-100 text-green-600 font-semibold px-2 py-0.5 rounded-full">{openOrders.length}</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {openOrders.map(order => (
-                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
-                  ))}
-                </div>
-              </section>
-            )}
+            <CollapsibleSection accentColor="bg-green-500" label="פתוחות למועמדות" count={openOrders.length} countBg="bg-green-100" countColor="text-green-600" defaultOpen>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {openOrders.map(order => (
+                  <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
+                ))}
+              </div>
+            </CollapsibleSection>
 
-            {/* Candidacy submission closed */}
-            {candidacyClosedOrders.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1 h-4 bg-orange-300 rounded-full" />
-                  <h2 className="text-sm font-semibold text-orange-500 uppercase tracking-wide">הגשת המועמדויות הסתיימה</h2>
-                  <span className="text-xs bg-orange-100 text-orange-500 font-semibold px-2 py-0.5 rounded-full">{candidacyClosedOrders.length}</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
-                  {candidacyClosedOrders.map(order => (
-                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
-                  ))}
-                </div>
-              </section>
-            )}
+            <CollapsibleSection accentColor="bg-orange-300" label="הגשת המועמדויות הסתיימה" count={candidacyClosedOrders.length} labelColor="text-orange-500" countBg="bg-orange-100" countColor="text-orange-500">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
+                {candidacyClosedOrders.map(order => (
+                  <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
+                ))}
+              </div>
+            </CollapsibleSection>
 
-            {/* Closed for candidacy */}
-            {closedOrders.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1 h-4 bg-gray-300 rounded-full" />
-                  <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">נסגרה קבלת מועמדויות</h2>
-                  <span className="text-xs bg-gray-100 text-gray-500 font-semibold px-2 py-0.5 rounded-full">{closedOrders.length}</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-50">
-                  {closedOrders.map(order => (
-                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
-                  ))}
-                </div>
-              </section>
-            )}
+            <CollapsibleSection accentColor="bg-gray-300" label="נסגרה קבלת מועמדויות" count={closedOrders.length} labelColor="text-gray-400">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-50">
+                {closedOrders.map(order => (
+                  <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
+                ))}
+              </div>
+            </CollapsibleSection>
 
-            {/* Assignment done */}
-            {assignmentDoneOrders.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1 h-4 bg-slate-400 rounded-full" />
-                  <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">הסתיים השיבוץ</h2>
-                  <span className="text-xs bg-slate-100 text-slate-600 font-semibold px-2 py-0.5 rounded-full">{assignmentDoneOrders.length}</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
-                  {assignmentDoneOrders.map(order => (
-                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
-                  ))}
-                </div>
-              </section>
-            )}
+            <CollapsibleSection accentColor="bg-slate-400" label="הסתיים השיבוץ" count={assignmentDoneOrders.length} labelColor="text-slate-500" countBg="bg-slate-100" countColor="text-slate-600">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
+                {assignmentDoneOrders.map(order => (
+                  <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
+                ))}
+              </div>
+            </CollapsibleSection>
 
-            {/* Cancelled */}
-            {cancelledOrders.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-1 h-4 bg-red-400 rounded-full" />
-                  <h2 className="text-sm font-semibold text-red-500 uppercase tracking-wide">אירועים שבוטלו</h2>
-                  <span className="text-xs bg-red-100 text-red-500 font-semibold px-2 py-0.5 rounded-full">{cancelledOrders.length}</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {cancelledOrders.map(order => (
-                    <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} />
-                  ))}
-                </div>
-              </section>
-            )}
+            <CollapsibleSection accentColor="bg-red-400" label="אירועים שבוטלו" count={cancelledOrders.length} labelColor="text-red-500" countBg="bg-red-100" countColor="text-red-500">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {cancelledOrders.map(order => (
+                  <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
+                ))}
+              </div>
+            </CollapsibleSection>
 
           </div>
         )}

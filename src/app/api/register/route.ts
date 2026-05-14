@@ -61,14 +61,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const isOdt = session.role === "ODT";
+
     const requiredCol = getColumnValue(order, "numeric_mm185aw7");
     const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
-    const assignedCol = getColumnValue(order, "numeric_mm18d914");
+    const artistAssignedCol = getColumnValue(order, "numeric_mm18d914");
+    const odtAssignedCol = getColumnValue(order, "numeric_mm3b6rnr");
+
     const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
     const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
-    const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
-    const totalRequired = requiredCount + requiredOdtCount;
-    const capacityLimit = totalRequired > 0 ? Math.ceil(totalRequired * 1.5) : 0;
+    const artistAssigned = parseFloat(artistAssignedCol?.text || "0") || 0;
+    const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
+
+    const myRequired = isOdt ? requiredOdtCount : requiredCount;
+    const myAssigned = isOdt ? odtAssigned : artistAssigned;
+    const myCapacityLimit = myRequired > 0 ? Math.ceil(myRequired * 1.5) : 0;
+    const myAssignedColumnId = isOdt ? "numeric_mm3b6rnr" : "numeric_mm18d914";
+
+    // ODT can still register even when status is STATUS_CANDIDACY_CLOSED
+    // (that status means artist slots are full, not ODT)
+    const allowedStatuses = isOdt
+      ? [STATUS_OPEN, STATUS_CANDIDACY_CLOSED]
+      : [STATUS_OPEN];
+
+    if (!allowedStatuses.includes(status)) {
+      return NextResponse.json(
+        { error: "ההזמנה אינה פתוחה להגשת מועמדות" },
+        { status: 400 }
+      );
+    }
 
     // Check if already submitted candidacy
     const artistId = parseInt(session.id, 10);
@@ -88,7 +109,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (capacityLimit > 0 && assignedCount >= capacityLimit) {
+    if (myCapacityLimit > 0 && myAssigned >= myCapacityLimit) {
       return NextResponse.json(
         { error: "נסגרה קבלת מועמדויות להזמנה זו" },
         { status: 400 }
@@ -98,12 +119,13 @@ export async function POST(request: NextRequest) {
     // Create subitem
     const subitem = await createSubitem(orderId, session.name, session.id);
 
-    // Update assigned count
-    const newAssignedCount = assignedCount + 1;
-    await updateAssignedCount(orderId, newAssignedCount);
+    // Update per-role assigned count
+    const newAssigned = myAssigned + 1;
+    await updateAssignedCount(orderId, newAssigned, myAssignedColumnId);
 
-    // If reached 150% capacity, close candidacies
-    if (capacityLimit > 0 && newAssignedCount >= capacityLimit) {
+    // If artists reached 150% capacity, close candidacies for artists
+    // (ODT capacity closing is not represented in a separate status yet)
+    if (!isOdt && myCapacityLimit > 0 && newAssigned >= myCapacityLimit) {
       await updateOrderStatus(orderId, STATUS_CANDIDACY_CLOSED);
     }
 

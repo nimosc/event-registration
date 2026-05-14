@@ -85,8 +85,8 @@ export async function GET() {
         const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
         const odtRequired = parseFloat(odtRequiredCol?.text || "0") || 0;
         const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
-        const totalRequired = requiredCount + odtRequired;
-        const capacityLimit = totalRequired > 0 ? Math.ceil(totalRequired * 1.5) : 0;
+        const artistCapacity = requiredCount > 0 ? Math.ceil(requiredCount * 1.5) : 0;
+        const odtCapacity = odtRequired > 0 ? Math.ceil(odtRequired * 1.5) : 0;
 
         const subitems: SubitemData[] = (item.subitems || []).map((sub) => {
           const relationCol = sub.column_values.find(
@@ -124,7 +124,9 @@ export async function GET() {
           assignedCount,
           odtRequired,
           odtAssigned,
-          spotsRemaining: capacityLimit > 0 ? Math.max(0, capacityLimit - assignedCount) : (totalRequired > 0 ? 999 : 999),
+          spotsRemaining: session.role === "ODT"
+            ? (odtCapacity > 0 ? Math.max(0, odtCapacity - odtAssigned) : 999)
+            : (artistCapacity > 0 ? Math.max(0, artistCapacity - assignedCount) : 999),
           isRegistered: !!mySubitem,
           subitemId: mySubitem?.id,
           subitems,

@@ -13,6 +13,7 @@ export interface Order {
   requiredCount: number;
   odtRequired: number;
   assignedCount: number;
+  odtAssigned: number;
   spotsRemaining: number;
   isRegistered: boolean;
   subitemId?: string;
@@ -40,17 +41,21 @@ function formatDateDDMMYYYY(dateStr: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function SpotsBar({ required, odtRequired, assigned, forceDone }: { required: number; odtRequired: number; assigned: number; forceDone?: boolean }) {
-  const totalRequired = required + odtRequired;
+function SpotsBar({
+  artistRequired, odtRequired, applied, capacity, spotsRemaining, forceDone,
+}: {
+  artistRequired: number; odtRequired: number;
+  applied: number; capacity: number; spotsRemaining: number;
+  forceDone?: boolean;
+}) {
+  const totalRequired = artistRequired + odtRequired;
   if (totalRequired <= 0) return null;
-  const capacityLimit = Math.ceil(totalRequired * 1.5);
-  const remaining = capacityLimit - assigned;
-  const isClosed = forceDone || remaining <= 0;
-  const isOverRequired = !isClosed && assigned >= totalRequired;
-  const isAlmostFull = !isClosed && !isOverRequired && (assigned / capacityLimit) >= 0.75;
-  const percent = Math.min(100, (assigned / capacityLimit) * 100);
+  const isClosed = forceDone || spotsRemaining <= 0;
+  const isOverRequired = !isClosed && applied >= (capacity / 1.5);
+  const isAlmostFull = !isClosed && !isOverRequired && capacity > 0 && (applied / capacity) >= 0.75;
+  const percent = capacity > 0 ? Math.min(100, (applied / capacity) * 100) : 0;
 
-  const hasBreakdown = required > 0 && odtRequired > 0;
+  const hasBreakdown = artistRequired > 0 && odtRequired > 0;
 
   return (
     <div className="mt-3 space-y-1.5">
@@ -62,7 +67,7 @@ function SpotsBar({ required, odtRequired, assigned, forceDone }: { required: nu
         <span className={`font-medium ${isClosed ? "text-red-500" : isOverRequired ? "text-orange-500" : isAlmostFull ? "text-orange-400" : "text-emerald-600"}`}>
           {isClosed
             ? "נסגרה קבלת מועמדויות"
-            : `${remaining} מקומות פתוחים להגשה`}
+            : `${spotsRemaining} מקומות פתוחים להגשה`}
         </span>
       </div>
 
@@ -74,7 +79,7 @@ function SpotsBar({ required, odtRequired, assigned, forceDone }: { required: nu
           </span>
           <span className="text-gray-300 text-xs">+</span>
           <span className="inline-flex items-center bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-            {required} אומנים
+            {artistRequired} אומנים
           </span>
         </div>
       )}
@@ -91,7 +96,7 @@ function SpotsBar({ required, odtRequired, assigned, forceDone }: { required: nu
 
       {/* Row below bar: how many applied */}
       <div className="text-xs text-gray-400">
-        {assigned} הגישו מועמדות
+        {applied} הגישו מועמדות
       </div>
     </div>
   );
@@ -108,11 +113,12 @@ function Spinner() {
 
 interface OrderCardProps {
   order: Order;
+  userRole: string;
   onRegister: (orderId: string) => Promise<void>;
   onUnregister: (orderId: string, subitemId: string) => Promise<void>;
 }
 
-export default function OrderCard({ order, onRegister, onUnregister }: OrderCardProps) {
+export default function OrderCard({ order, userRole, onRegister, onUnregister }: OrderCardProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -207,7 +213,22 @@ export default function OrderCard({ order, onRegister, onUnregister }: OrderCard
         </div>
 
         {/* Spots bar */}
-        <SpotsBar required={order.requiredCount} odtRequired={order.odtRequired} assigned={order.assignedCount} forceDone={isAssignmentDone} />
+        {(() => {
+          const isOdt = userRole === "ODT";
+          const myRequired = isOdt ? order.odtRequired : order.requiredCount;
+          const myApplied = isOdt ? order.odtAssigned : order.assignedCount;
+          const myCapacity = myRequired > 0 ? Math.ceil(myRequired * 1.5) : 0;
+          return (
+            <SpotsBar
+              artistRequired={order.requiredCount}
+              odtRequired={order.odtRequired}
+              applied={myApplied}
+              capacity={myCapacity}
+              spotsRemaining={order.spotsRemaining}
+              forceDone={isAssignmentDone}
+            />
+          );
+        })()}
 
         {/* Error */}
         {error && (
