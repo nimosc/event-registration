@@ -6,7 +6,19 @@ export const BOARDS = {
   ORDERS: 5092847547,
   SUBITEMS: 5092847598,
   ISSUE_REPORTS: 5094343821,
+  INVOICES: 5097191457,
 } as const;
+
+export const INVOICE_ARTIST_RELATION_COLUMN_ID = "board_relation_mm3pxdzs";
+export const INVOICE_ORDER_RELATION_COLUMN_ID = "board_relation_mm3pnfdw";
+export const ARTIST_BANK_DETAILS_COLUMN_ID = "text_mm3pcn99";
+// Invoice board columns
+export const INVOICE_AMOUNT_EXPECTED_COLUMN_ID = "numbernt648wfm";   // סכום שאמור להיות (system)
+export const INVOICE_AMOUNT_ACTUAL_COLUMN_ID = "numeric_mm3ph0nj";   // סכום בחשבונית (AI extracted)
+export const INVOICE_NUMBER_COLUMN_ID = "text_mm3p1e0e";             // מספר חשבונית
+export const INVOICE_DESCRIPTION_COLUMN_ID = "text_17";              // תיאור של החשבונית
+export const INVOICE_AMOUNT_NOTE_COLUMN_ID = "text_mm3p6pma";        // הערות על החשבונית
+export const INVOICE_ORDER_IDS_COLUMN_ID = "text_mm3ptnez";          // order IDs as JSON (for duplicate check)
 
 export interface MondayColumnValue {
   id: string;
@@ -643,7 +655,7 @@ export async function getAllOrders() {
             subitems {
               id
               name
-              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3bjfvg"]) {
+              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3bjfvg", "color_mm3pd8vf"]) {
                 id
                 text
                 value
@@ -1064,6 +1076,19 @@ export async function getOrderAdminSnapshotById(
 
 // ─── Mutation: Update artist location ────────────────────────────────────────
 
+export async function getArtistBankDetails(artistId: string): Promise<string> {
+  const data = await mondayQuery<{ items: { column_values: { text: string }[] }[] }>(
+    `query { items(ids: [${artistId}]) { column_values(ids: ["${ARTIST_BANK_DETAILS_COLUMN_ID}"]) { text } } }`
+  );
+  return (data.items?.[0]?.column_values?.[0]?.text || "").trim();
+}
+
+export async function updateArtistBankDetails(artistId: string, bankDetails: string): Promise<void> {
+  await mondayQuery(
+    `mutation { change_column_value(board_id: ${BOARDS.ARTISTS}, item_id: ${artistId}, column_id: "${ARTIST_BANK_DETAILS_COLUMN_ID}", value: ${JSON.stringify(JSON.stringify(bankDetails))}) { id } }`
+  );
+}
+
 export async function updateArtistLocation(
   artistId: string,
   location: string
@@ -1327,4 +1352,170 @@ export async function createIssueReport(input: IssueReportInput): Promise<{ item
   });
 
   return { itemId };
+}
+
+// ─── Invoices board ───────────────────────────────────────────────────────────
+
+export interface InvoiceItemDto {
+  id: string;
+  name: string;
+  status: string;
+  date: string;
+  amount: number;       // expected (system calculated)
+  actualAmount: number; // from uploaded invoice file (AI)
+  invoiceNumber: string;
+  bankDetails: string;
+  amountNote: string;
+  description: string;
+  orderIds: string[];
+}
+
+export async function createInvoiceItem(params: {
+  artistId: string;
+  artistName: string;
+  orderIds: string[];
+  amount: number;          // expected amount (system calculated)
+  actualAmount?: number;   // amount from uploaded invoice file (AI extracted)
+  invoiceNumber: string;   // invoice/receipt number (AI extracted)
+  bankDetails: string;
+  amountNote: string;      // explanation if amount differs
+  description: string;     // invoice description / details
+  eventDate: string;
+  monthLabel: string;
+}): Promise<{ id: string }> {
+  const itemName = `חשבונית - ${params.monthLabel} - ${params.artistName}`;
+
+  const colValues: Record<string, unknown> = {};
+  if (params.eventDate) colValues["date"] = { date: params.eventDate };
+  if (params.amount) colValues[INVOICE_AMOUNT_EXPECTED_COLUMN_ID] = params.amount;
+  if (params.actualAmount != null) colValues[INVOICE_AMOUNT_ACTUAL_COLUMN_ID] = params.actualAmount;
+  if (params.invoiceNumber) colValues[INVOICE_NUMBER_COLUMN_ID] = params.invoiceNumber;
+  if (params.bankDetails) colValues["text9"] = params.bankDetails;
+  if (params.amountNote) colValues[INVOICE_AMOUNT_NOTE_COLUMN_ID] = params.amountNote;
+  if (params.description) colValues[INVOICE_DESCRIPTION_COLUMN_ID] = params.description;
+  colValues[INVOICE_ORDER_IDS_COLUMN_ID] = JSON.stringify(params.orderIds);
+
+  const createData = await mondayQuery<{ create_item: { id: string } }>(
+    `mutation ($boardId: ID!, $itemName: String!, $colValues: JSON!) {
+      create_item(board_id: $boardId, item_name: $itemName, column_values: $colValues) { id }
+    }`,
+    { boardId: String(BOARDS.INVOICES), itemName, colValues: JSON.stringify(colValues) }
+  );
+
+  const invoiceId = createData.create_item.id;
+
+  await mondayQuery(
+    `mutation {
+      change_column_value(
+        board_id: ${BOARDS.INVOICES}, item_id: ${invoiceId},
+        column_id: "${INVOICE_ARTIST_RELATION_COLUMN_ID}",
+        value: ${JSON.stringify(JSON.stringify({ item_ids: [parseInt(params.artistId, 10)] }))}
+      ) { id }
+    }`
+  );
+
+  if (params.orderIds.length > 0) {
+    await mondayQuery(
+      `mutation {
+        change_column_value(
+          board_id: ${BOARDS.INVOICES}, item_id: ${invoiceId},
+          column_id: "${INVOICE_ORDER_RELATION_COLUMN_ID}",
+          value: ${JSON.stringify(JSON.stringify({ item_ids: params.orderIds.map(Number) }))}
+        ) { id }
+      }`
+    );
+  }
+
+  return { id: invoiceId };
+}
+
+export async function uploadFileToInvoiceItem(itemId: string, file: Blob, filename: string): Promise<void> {
+  if (!MONDAY_API_TOKEN) throw new Error("MONDAY_API_TOKEN not set");
+
+  const mutation = `mutation ($file: File!) { add_file_to_column(item_id: ${itemId}, column_id: "filev50d79ch", file: $file) { id } }`;
+
+  const formData = new FormData();
+  formData.append("query", mutation);
+  formData.append("variables[file]", file, filename);
+
+  const response = await fetch("https://api.monday.com/v2/file", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${MONDAY_API_TOKEN}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Monday file upload error: ${response.status} - ${text.slice(0, 200)}`);
+  }
+
+  const json = await response.json() as { errors?: { message: string }[] };
+  if (json.errors?.length) throw new Error(`Monday file upload: ${json.errors[0].message}`);
+}
+
+export async function getArtistInvoices(artistId: string): Promise<InvoiceItemDto[]> {
+  const query = `
+    query {
+      boards(ids: [${BOARDS.INVOICES}]) {
+        items_page(limit: 500) {
+          items {
+            id
+            name
+            column_values(ids: ["status8", "date", "${INVOICE_AMOUNT_EXPECTED_COLUMN_ID}", "${INVOICE_AMOUNT_ACTUAL_COLUMN_ID}", "${INVOICE_NUMBER_COLUMN_ID}", "text9", "${INVOICE_AMOUNT_NOTE_COLUMN_ID}", "${INVOICE_DESCRIPTION_COLUMN_ID}", "${INVOICE_ORDER_IDS_COLUMN_ID}", "${INVOICE_ARTIST_RELATION_COLUMN_ID}", "${INVOICE_ORDER_RELATION_COLUMN_ID}"]) {
+              id text value
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await mondayQuery<{ boards: MondayBoard[] }>(query);
+  const items = data.boards[0]?.items_page?.items ?? [];
+  const artistNum = parseInt(artistId, 10);
+
+  return items
+    .filter((item) => {
+      const col = getColumnValue(item, INVOICE_ARTIST_RELATION_COLUMN_ID);
+      return parseLinkedItemIds(col?.value).includes(artistNum);
+    })
+    .map((item) => {
+      const dateCol = getColumnValue(item, "date");
+      const expectedAmountCol = getColumnValue(item, INVOICE_AMOUNT_EXPECTED_COLUMN_ID);
+      const actualAmountCol = getColumnValue(item, INVOICE_AMOUNT_ACTUAL_COLUMN_ID);
+      const orderCol = getColumnValue(item, INVOICE_ORDER_RELATION_COLUMN_ID);
+      return {
+        id: item.id,
+        name: item.name,
+        status: getColumnValue(item, "status8")?.text || "",
+        date: parseMondayDateValue(dateCol?.value) || dateCol?.text || "",
+        amount: parseFloat(expectedAmountCol?.text || "0") || 0,
+        actualAmount: parseFloat(actualAmountCol?.text || "0") || 0,
+        invoiceNumber: getColumnValue(item, INVOICE_NUMBER_COLUMN_ID)?.text || "",
+        bankDetails: getColumnValue(item, "text9")?.text || "",
+        amountNote: getColumnValue(item, INVOICE_AMOUNT_NOTE_COLUMN_ID)?.text || "",
+        description: getColumnValue(item, INVOICE_DESCRIPTION_COLUMN_ID)?.text || "",
+        orderIds: (() => {
+          const raw = getColumnValue(item, INVOICE_ORDER_IDS_COLUMN_ID)?.text || "";
+          try { return JSON.parse(raw) as string[]; } catch { return []; }
+        })(),
+      };
+    });
+}
+
+export async function markSubitemsInvoiceSubmitted(subitemIds: string[]): Promise<void> {
+  await Promise.all(
+    subitemIds.map((id) =>
+      mondayQuery(
+        `mutation {
+          change_column_value(
+            board_id: ${BOARDS.SUBITEMS},
+            item_id: ${id},
+            column_id: "color_mm3pd8vf",
+            value: ${JSON.stringify(JSON.stringify({ label: "הוגשה" }))}
+          ) { id }
+        }`
+      )
+    )
+  );
 }

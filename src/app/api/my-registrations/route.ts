@@ -3,6 +3,7 @@ import {
   getAllOrders,
   getColumnValue,
   getArtistTaxStatus,
+  getArtistBankDetails,
   parseLinkedItemIds,
   mapMondayAttendanceToInternal,
   ORDER_ACTIVITY_HOURS_COLUMN_ID,
@@ -17,9 +18,10 @@ export async function GET() {
     }
 
     const artistId = parseInt(session.id, 10);
-    const [items, artistStatus] = await Promise.all([
+    const [items, artistStatus, bankDetails] = await Promise.all([
       getAllOrders(),
       getArtistTaxStatus(artistId),
+      getArtistBankDetails(String(artistId)),
     ]);
 
     const myRegistrations: {
@@ -32,6 +34,7 @@ export async function GET() {
       subitemId: string;
       attendanceStatus: string;
       role: string;
+      invoiceStatus: string;
     }[] = [];
 
     for (const order of items) {
@@ -52,6 +55,9 @@ export async function GET() {
         const roleCol = sub.column_values.find(
           (cv) => cv.id === "dropdown_mm18519p"
         );
+        const invoiceStatusCol = sub.column_values.find(
+          (cv) => cv.id === "color_mm3pd8vf"
+        );
 
         const linkedIds = parseLinkedItemIds(relationCol?.value);
 
@@ -66,6 +72,7 @@ export async function GET() {
             subitemId: sub.id,
             attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
             role: roleCol?.text || "",
+            invoiceStatus: invoiceStatusCol?.text || "",
           });
         }
       }
@@ -74,6 +81,7 @@ export async function GET() {
     return NextResponse.json({
       registrations: myRegistrations,
       artistStatus: artistStatus || undefined,
+      bankDetails: bankDetails || undefined,
     });
   } catch (error) {
     console.error("My registrations fetch error:", error);
