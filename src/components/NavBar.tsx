@@ -86,6 +86,7 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
       : [
           { href: "/orders", label: "הזמנות פתוחות" },
           { href: "/my-registrations", label: "ההזמנות שלי" },
+          { href: "/invoices", label: "הגשת חשבוניות" },
         ];
 
   return (

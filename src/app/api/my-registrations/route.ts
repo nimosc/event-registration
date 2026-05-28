@@ -3,9 +3,10 @@ import {
   getAllOrders,
   getColumnValue,
   getArtistTaxStatus,
-  getArtistBankDetails,
+  getArtistBankDetailsFields,
   parseLinkedItemIds,
   mapMondayAttendanceToInternal,
+  mapMondayCandidacyToInternal,
   ORDER_ACTIVITY_HOURS_COLUMN_ID,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
@@ -21,7 +22,7 @@ export async function GET() {
     const [items, artistStatus, bankDetails] = await Promise.all([
       getAllOrders(),
       getArtistTaxStatus(artistId),
-      getArtistBankDetails(String(artistId)),
+      getArtistBankDetailsFields(String(artistId)),
     ]);
 
     const myRegistrations: {
@@ -33,6 +34,7 @@ export async function GET() {
       orderStatus: string;
       subitemId: string;
       attendanceStatus: string;
+      candidacyStatus: string;
       role: string;
       invoiceStatus: string;
     }[] = [];
@@ -55,6 +57,9 @@ export async function GET() {
         const roleCol = sub.column_values.find(
           (cv) => cv.id === "dropdown_mm18519p"
         );
+        const candidacyCol = sub.column_values.find(
+          (cv) => cv.id === "color_mm1q61p2"
+        );
         const invoiceStatusCol = sub.column_values.find(
           (cv) => cv.id === "color_mm3pd8vf"
         );
@@ -71,6 +76,7 @@ export async function GET() {
             orderStatus: statusCol?.text || "",
             subitemId: sub.id,
             attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
+            candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
             role: roleCol?.text || "",
             invoiceStatus: invoiceStatusCol?.text || "",
           });
@@ -81,7 +87,11 @@ export async function GET() {
     return NextResponse.json({
       registrations: myRegistrations,
       artistStatus: artistStatus || undefined,
-      bankDetails: bankDetails || undefined,
+      bankDetails: bankDetails.legacy || undefined,
+      beneficiaryName: bankDetails.beneficiaryName || undefined,
+      bankCode: bankDetails.bankCode || undefined,
+      bankBranch: bankDetails.bankBranch || undefined,
+      bankAccount: bankDetails.bankAccount || undefined,
     });
   } catch (error) {
     console.error("My registrations fetch error:", error);

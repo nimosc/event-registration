@@ -7,11 +7,12 @@ import {
   updateAssignedCount,
   updateOrderStatus,
   getColumnValue,
-  parseColorLabel,
   parseLinkedItemIds,
-  STATUS_OPEN,
-  STATUS_CANDIDACY_CLOSED,
   STATUS_ASSIGNMENT_DONE,
+  STATUS_CANCELLED,
+  getOrderCapacityState,
+  isRegistrationOpenForRole,
+  getCandidacyOrderStatusFromCapacity,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     const statusCol = getColumnValue(order, "color_mm18ej76");
     const status = statusCol?.text || "";
 
-    if (status !== STATUS_OPEN) {
+    if (status === STATUS_CANCELLED || status === STATUS_ASSIGNMENT_DONE) {
       return NextResponse.json(
         { error: "ההזמנה אינה פתוחה להגשת מועמדות" },
         { status: 400 }
@@ -73,20 +74,22 @@ export async function POST(request: NextRequest) {
     const artistAssigned = parseFloat(artistAssignedCol?.text || "0") || 0;
     const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
 
-    const myRequired = isOdt ? requiredOdtCount : requiredCount;
     const myAssigned = isOdt ? odtAssigned : artistAssigned;
-    const myCapacityLimit = myRequired > 0 ? Math.ceil(myRequired * 1.5) : 0;
     const myAssignedColumnId = isOdt ? "numeric_mm3b6rnr" : "numeric_mm18d914";
+    const capacity = getOrderCapacityState(
+      requiredCount,
+      artistAssigned,
+      requiredOdtCount,
+      odtAssigned
+    );
+    const roleForCapacity = isOdt ? "ODT" : "אומן";
+    const myCapacityLimit = isOdt
+      ? capacity.odt.capacityLimit
+      : capacity.artist.capacityLimit;
 
-    // ODT can still register even when status is STATUS_CANDIDACY_CLOSED
-    // (that status means artist slots are full, not ODT)
-    const allowedStatuses = isOdt
-      ? [STATUS_OPEN, STATUS_CANDIDACY_CLOSED]
-      : [STATUS_OPEN];
-
-    if (!allowedStatuses.includes(status)) {
+    if (!isRegistrationOpenForRole(roleForCapacity, capacity)) {
       return NextResponse.json(
-        { error: "ההזמנה אינה פתוחה להגשת מועמדות" },
+        { error: "נסגרה קבלת מועמדויות להזמנה זו" },
         { status: 400 }
       );
     }
@@ -123,10 +126,17 @@ export async function POST(request: NextRequest) {
     const newAssigned = myAssigned + 1;
     await updateAssignedCount(orderId, newAssigned, myAssignedColumnId);
 
-    // If artists reached 150% capacity, close candidacies for artists
-    // (ODT capacity closing is not represented in a separate status yet)
-    if (!isOdt && myCapacityLimit > 0 && newAssigned >= myCapacityLimit) {
-      await updateOrderStatus(orderId, STATUS_CANDIDACY_CLOSED);
+    const newArtistAssigned = isOdt ? artistAssigned : newAssigned;
+    const newOdtAssigned = isOdt ? newAssigned : odtAssigned;
+    const capacityAfterCreate = getOrderCapacityState(
+      requiredCount,
+      newArtistAssigned,
+      requiredOdtCount,
+      newOdtAssigned
+    );
+    const desiredStatus = getCandidacyOrderStatusFromCapacity(capacityAfterCreate, status);
+    if (desiredStatus !== status) {
+      await updateOrderStatus(orderId, desiredStatus);
     }
 
     return NextResponse.json({
@@ -196,11 +206,32 @@ export async function DELETE(request: NextRequest) {
     const newAssignedCount = Math.max(0, assignedCount - 1);
     await updateAssignedCount(orderId, newAssignedCount, deleteAssignedColumnId);
 
-    // If order was closed (either status), reopen it
     const statusCol = getColumnValue(order, "color_mm18ej76");
     const status = statusCol?.text || "";
-    if (status === STATUS_CANDIDACY_CLOSED || status === STATUS_ASSIGNMENT_DONE) {
-      await updateOrderStatus(orderId, STATUS_OPEN);
+    const requiredCol = getColumnValue(order, "numeric_mm185aw7");
+    const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
+    const artistAssignedCol = getColumnValue(order, "numeric_mm18d914");
+    const odtAssignedCol = getColumnValue(order, "numeric_mm3b6rnr");
+    const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
+    const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
+    const artistAssigned = parseFloat(artistAssignedCol?.text || "0") || 0;
+    const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
+
+    const newArtistAssigned = session.role === "ODT"
+      ? artistAssigned
+      : Math.max(0, artistAssigned - 1);
+    const newOdtAssigned = session.role === "ODT"
+      ? Math.max(0, odtAssigned - 1)
+      : odtAssigned;
+    const capacityAfterDelete = getOrderCapacityState(
+      requiredCount,
+      newArtistAssigned,
+      requiredOdtCount,
+      newOdtAssigned
+    );
+    const desiredStatus = getCandidacyOrderStatusFromCapacity(capacityAfterDelete, status);
+    if (desiredStatus !== status) {
+      await updateOrderStatus(orderId, desiredStatus);
     }
 
     return NextResponse.json({ success: true });

@@ -15,11 +15,12 @@ import {
   mapInternalCandidacyToMonday,
   ARTIST_ACTIVE_STATUS_COLUMN_ID,
   STATUS_OPEN,
-  STATUS_CANDIDACY_CLOSED,
   STATUS_ASSIGNMENT_DONE,
   STATUS_CANCELLED,
   CANDIDACY_STATUS_COLUMN_ID,
   BOARDS,
+  getOrderCapacityState,
+  getCandidacyOrderStatusFromCapacity,
 } from "@/lib/monday";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
 
@@ -63,8 +64,6 @@ export async function POST(request: NextRequest) {
     const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
     const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
 
-    const capacityLimit = requiredCount > 0 ? Math.ceil(requiredCount * 1.5) : 0;
-
     // prevent duplicates for this artist
     const artistIdNum = parseInt(artistId, 10);
     const alreadyRegistered = (order.subitems || []).some((sub) => {
@@ -76,9 +75,25 @@ export async function POST(request: NextRequest) {
     const subitem = await createSubitem(orderId, artistBasic.name, artistBasic.id);
     const newAssignedCount = assignedCount + 1;
     await updateAssignedCount(orderId, newAssignedCount);
-
-    if (capacityLimit > 0 && newAssignedCount >= capacityLimit) {
-      await updateOrderStatus(orderId, STATUS_CANDIDACY_CLOSED);
+    const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
+    const odtAssignedCol = getColumnValue(order, "numeric_mm3b6rnr");
+    const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
+    const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
+    const capacityAfterAssign = getOrderCapacityState(
+      requiredCount,
+      newAssignedCount,
+      requiredOdtCount,
+      odtAssigned
+    );
+    const desiredCandidacyStatus = getCandidacyOrderStatusFromCapacity(
+      capacityAfterAssign,
+      orderStatus
+    );
+    if (
+      desiredCandidacyStatus !== orderStatus &&
+      desiredCandidacyStatus !== STATUS_ASSIGNMENT_DONE
+    ) {
+      await updateOrderStatus(orderId, desiredCandidacyStatus);
     }
 
     // Mark candidacy as approved since this is an admin assignment.

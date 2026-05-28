@@ -3,11 +3,18 @@ import { getSession } from "@/lib/auth";
 import {
   createInvoiceItem,
   getArtistInvoices,
+  getAllOrders,
+  mapMondayAttendanceToInternal,
+  mapMondayCandidacyToInternal,
+  parseLinkedItemIds,
   uploadFileToInvoiceItem,
   updateArtistBankDetails,
-  getArtistBankDetails,
+  getArtistBankDetailsFields,
   markSubitemsInvoiceSubmitted,
+  linkSubitemsToInvoice,
 } from "@/lib/monday";
+import { canSubmitInvoice } from "@/lib/invoiceEligibility";
+import { extractInvoiceData } from "@/lib/invoiceExtract";
 
 export async function GET() {
   const session = await getSession();
@@ -27,6 +34,10 @@ export async function POST(req: NextRequest) {
   const amount = Number(formData.get("amount") ?? 0);
   const actualAmount = formData.get("actualAmount") ? Number(formData.get("actualAmount")) : undefined;
   const bankDetails = (formData.get("bankDetails") as string) || "";
+  const beneficiaryName = (formData.get("beneficiaryName") as string) || "";
+  const bankCode = (formData.get("bankCode") as string) || "";
+  const bankBranch = (formData.get("bankBranch") as string) || "";
+  const bankAccount = (formData.get("bankAccount") as string) || "";
   const invoiceNumber = (formData.get("invoiceNumber") as string) || "";
   const amountNote = (formData.get("amountNote") as string) || "";
   const description = (formData.get("description") as string) || "";
@@ -37,6 +48,15 @@ export async function POST(req: NextRequest) {
   if (!orderIds.length || !amount) {
     return NextResponse.json({ error: "חסרים שדות חובה" }, { status: 400 });
   }
+  if (!file || file.size === 0) {
+    return NextResponse.json({ error: "חובה לצרף קובץ חשבונית" }, { status: 400 });
+  }
+  if (!beneficiaryName.trim() || !bankCode.trim() || !bankBranch.trim() || !bankAccount.trim()) {
+    return NextResponse.json({ error: "חובה למלא פרטי חשבון בנק" }, { status: 400 });
+  }
+  if (!subitemIds.length) {
+    return NextResponse.json({ error: "יש לבחור לפחות אירוע אחד" }, { status: 400 });
+  }
 
   // Duplicate check: reject if any of the submitted orders already has an invoice
   const existing = await getArtistInvoices(session.id);
@@ -46,33 +66,93 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "חשבונית כבר הוגשה עבור חלק מהאירועים" }, { status: 409 });
   }
 
+  const artistId = parseInt(session.id, 10);
+  const requestedOrderIds = new Set(orderIds);
+  const eligibleOrderIds = new Set<string>();
+  const eligibleSubitemIds = new Set<string>();
+  const orders = await getAllOrders();
+
+  for (const order of orders) {
+    if (!requestedOrderIds.has(order.id)) continue;
+    for (const sub of order.subitems || []) {
+      const relationCol = sub.column_values.find((cv) => cv.id === "board_relation_mm18r4da");
+      const attendanceCol = sub.column_values.find((cv) => cv.id === "color_mm18bjdk");
+      const candidacyCol = sub.column_values.find((cv) => cv.id === "color_mm1q61p2");
+      const invoiceStatusCol = sub.column_values.find((cv) => cv.id === "color_mm3pd8vf");
+      const linkedIds = parseLinkedItemIds(relationCol?.value);
+      const belongsToArtist = linkedIds.includes(artistId) || sub.name.trim() === session.name.trim();
+      if (!belongsToArtist) continue;
+
+      if (
+        canSubmitInvoice({
+          attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
+          candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
+          invoiceStatus: invoiceStatusCol?.text || "",
+        })
+      ) {
+        eligibleOrderIds.add(order.id);
+        eligibleSubitemIds.add(sub.id);
+      }
+    }
+  }
+
+  const notEligibleOrders = orderIds.filter((id) => !eligibleOrderIds.has(id));
+  if (notEligibleOrders.length > 0) {
+    return NextResponse.json(
+      { error: "נבחרו אירועים שלא עומדים בתנאי הגשת חשבונית" },
+      { status: 403 }
+    );
+  }
+
+  if (subitemIds.some((id) => !eligibleSubitemIds.has(id))) {
+    return NextResponse.json(
+      { error: "נבחרו הרשמות שלא עומדות בתנאי הגשת חשבונית" },
+      { status: 403 }
+    );
+  }
+
+  const normalizedAmountNote = amountNote.trim();
+
+  const extractedInvoice = await extractInvoiceData(file);
+  const extractedAmount = extractedInvoice?.amount ?? undefined;
+
   const result = await createInvoiceItem({
     artistId: session.id,
     artistName: session.name,
     orderIds,
     amount,
     actualAmount,
+    extractedAmount,
     invoiceNumber,
     bankDetails,
-    amountNote,
+    beneficiaryName,
+    bankCode,
+    bankBranch,
+    bankAccount,
+    amountNote: normalizedAmountNote,
     description,
     eventDate,
     monthLabel,
   });
 
-  if (file && file.size > 0) {
-    await uploadFileToInvoiceItem(result.id, file, file.name);
-  }
+  await uploadFileToInvoiceItem(result.id, file, file.name);
 
   if (subitemIds.length > 0) {
+    await linkSubitemsToInvoice(subitemIds, result.id);
     await markSubitemsInvoiceSubmitted(subitemIds);
   }
 
   // Save bank details back to artist profile if changed
-  if (bankDetails) {
-    const current = await getArtistBankDetails(session.id);
-    if (current !== bankDetails) {
-      await updateArtistBankDetails(session.id, bankDetails);
+  if (bankDetails || beneficiaryName || bankCode || bankBranch || bankAccount) {
+    const current = await getArtistBankDetailsFields(session.id);
+    if (
+      current.legacy !== bankDetails ||
+      current.beneficiaryName !== beneficiaryName ||
+      current.bankCode !== bankCode ||
+      current.bankBranch !== bankBranch ||
+      current.bankAccount !== bankAccount
+    ) {
+      await updateArtistBankDetails(session.id, bankDetails, beneficiaryName, bankCode, bankBranch, bankAccount);
     }
   }
 

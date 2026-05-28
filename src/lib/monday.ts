@@ -12,13 +12,23 @@ export const BOARDS = {
 export const INVOICE_ARTIST_RELATION_COLUMN_ID = "board_relation_mm3pxdzs";
 export const INVOICE_ORDER_RELATION_COLUMN_ID = "board_relation_mm3pnfdw";
 export const ARTIST_BANK_DETAILS_COLUMN_ID = "text_mm3pcn99";
+export const ARTIST_BANK_CODE_COLUMN_ID = "text_mm3sxtzz";
+export const ARTIST_BANK_BRANCH_COLUMN_ID = "text_mm3s1x5x";
+export const ARTIST_BANK_ACCOUNT_COLUMN_ID = "text_mm3syq5v";
+export const ARTIST_BANK_BENEFICIARY_COLUMN_ID = "text_mm3swn9p";
+export const INVOICE_BANK_CODE_COLUMN_ID = "text_mm3se4jy";
+export const INVOICE_BANK_BRANCH_COLUMN_ID = "text_mm3sehzc";
+export const INVOICE_BANK_ACCOUNT_COLUMN_ID = "text_mm3sm92r";
+export const INVOICE_BANK_BENEFICIARY_COLUMN_ID = "text_mm3s6je5";
 // Invoice board columns
 export const INVOICE_AMOUNT_EXPECTED_COLUMN_ID = "numbernt648wfm";   // סכום שאמור להיות (system)
-export const INVOICE_AMOUNT_ACTUAL_COLUMN_ID = "numeric_mm3ph0nj";   // סכום בחשבונית (AI extracted)
+export const INVOICE_AMOUNT_EXTRACTED_COLUMN_ID = "numeric_mm3pvh20"; // סכום שחולץ מהקובץ (AI, server-side)
+export const INVOICE_AMOUNT_REPORTED_COLUMN_ID = "numeric_mm3ph0nj";  // סכום שהלקוח שלח מהטופס
 export const INVOICE_NUMBER_COLUMN_ID = "text_mm3p1e0e";             // מספר חשבונית
 export const INVOICE_DESCRIPTION_COLUMN_ID = "text_17";              // תיאור של החשבונית
 export const INVOICE_AMOUNT_NOTE_COLUMN_ID = "text_mm3p6pma";        // הערות על החשבונית
 export const INVOICE_ORDER_IDS_COLUMN_ID = "text_mm3ptnez";          // order IDs as JSON (for duplicate check)
+export const SUBITEM_INVOICE_RELATION_COLUMN_ID = "board_relation_mm3shx2f"; // subitem <-> invoice bidirectional relation
 
 export interface MondayColumnValue {
   id: string;
@@ -525,6 +535,64 @@ export const STATUS_OPEN = "בתהליך שיבוץ";
 export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
 export const STATUS_ASSIGNMENT_DONE = "הסתיים השיבוץ";
 export const STATUS_CANCELLED = "בוטל";
+
+export type RegistrationRole = "אומן" | "ODT";
+
+export interface RoleCapacityState {
+  required: number;
+  assigned: number;
+  capacityLimit: number;
+  isClosed: boolean;
+}
+
+export interface OrderCapacityState {
+  artist: RoleCapacityState;
+  odt: RoleCapacityState;
+}
+
+function toCapacityLimit(required: number): number {
+  return required > 0 ? Math.ceil(required * 1.5) : 0;
+}
+
+export function getRoleCapacityState(required: number, assigned: number): RoleCapacityState {
+  const capacityLimit = toCapacityLimit(required);
+  return {
+    required,
+    assigned,
+    capacityLimit,
+    isClosed: capacityLimit > 0 && assigned >= capacityLimit,
+  };
+}
+
+export function getOrderCapacityState(
+  requiredArtist: number,
+  assignedArtist: number,
+  requiredOdt: number,
+  assignedOdt: number
+): OrderCapacityState {
+  return {
+    artist: getRoleCapacityState(requiredArtist, assignedArtist),
+    odt: getRoleCapacityState(requiredOdt, assignedOdt),
+  };
+}
+
+export function isRegistrationOpenForRole(
+  role: RegistrationRole,
+  capacity: OrderCapacityState
+): boolean {
+  return role === "ODT" ? !capacity.odt.isClosed : !capacity.artist.isClosed;
+}
+
+export function getCandidacyOrderStatusFromCapacity(
+  capacity: OrderCapacityState,
+  currentStatus: string
+): string {
+  if (currentStatus === STATUS_CANCELLED) return STATUS_CANCELLED;
+  if (currentStatus === STATUS_ASSIGNMENT_DONE && !capacity.artist.isClosed) {
+    return STATUS_OPEN;
+  }
+  return capacity.artist.isClosed ? STATUS_CANDIDACY_CLOSED : STATUS_OPEN;
+}
 
 export async function getAllArtists(extraColumnIds: string[] = []) {
   const baseIds = ["text_mm18xbdq", "text_mm18d6vn", "color_mm18btbr", "color_mm18wjry", ARTIST_LOCATION_COLUMN_ID];
@@ -1077,15 +1145,65 @@ export async function getOrderAdminSnapshotById(
 // ─── Mutation: Update artist location ────────────────────────────────────────
 
 export async function getArtistBankDetails(artistId: string): Promise<string> {
-  const data = await mondayQuery<{ items: { column_values: { text: string }[] }[] }>(
-    `query { items(ids: [${artistId}]) { column_values(ids: ["${ARTIST_BANK_DETAILS_COLUMN_ID}"]) { text } } }`
-  );
-  return (data.items?.[0]?.column_values?.[0]?.text || "").trim();
+  const details = await getArtistBankDetailsFields(artistId);
+  if (details.beneficiaryName || details.bankCode || details.bankBranch || details.bankAccount) {
+    return [details.beneficiaryName, details.bankCode, details.bankBranch, details.bankAccount].filter(Boolean).join(" / ");
+  }
+  return details.legacy;
 }
 
-export async function updateArtistBankDetails(artistId: string, bankDetails: string): Promise<void> {
+export interface ArtistBankDetails {
+  beneficiaryName: string;
+  bankCode: string;
+  bankBranch: string;
+  bankAccount: string;
+  legacy: string;
+}
+
+export async function getArtistBankDetailsFields(artistId: string): Promise<ArtistBankDetails> {
+  const data = await mondayQuery<{ items: { column_values: { id: string; text: string }[] }[] }>(
+    `query { items(ids: [${artistId}]) { column_values(ids: ["${ARTIST_BANK_DETAILS_COLUMN_ID}", "${ARTIST_BANK_BENEFICIARY_COLUMN_ID}", "${ARTIST_BANK_CODE_COLUMN_ID}", "${ARTIST_BANK_BRANCH_COLUMN_ID}", "${ARTIST_BANK_ACCOUNT_COLUMN_ID}"]) { id text } } }`
+  );
+  const columns = data.items?.[0]?.column_values ?? [];
+  const byId = new Map(columns.map((col) => [col.id, (col.text || "").trim()]));
+  return {
+    beneficiaryName: byId.get(ARTIST_BANK_BENEFICIARY_COLUMN_ID) || "",
+    bankCode: byId.get(ARTIST_BANK_CODE_COLUMN_ID) || "",
+    bankBranch: byId.get(ARTIST_BANK_BRANCH_COLUMN_ID) || "",
+    bankAccount: byId.get(ARTIST_BANK_ACCOUNT_COLUMN_ID) || "",
+    legacy: byId.get(ARTIST_BANK_DETAILS_COLUMN_ID) || "",
+  };
+}
+
+export async function updateArtistBankDetails(
+  artistId: string,
+  bankDetails: string,
+  beneficiaryName?: string,
+  bankCode?: string,
+  bankBranch?: string,
+  bankAccount?: string
+): Promise<void> {
+  const beneficiary = (beneficiaryName || "").trim();
+  const code = (bankCode || "").trim();
+  const branch = (bankBranch || "").trim();
+  const account = (bankAccount || "").trim();
+  const legacy = bankDetails.trim() || [beneficiary, code, branch, account].filter(Boolean).join(" / ");
+
   await mondayQuery(
-    `mutation { change_column_value(board_id: ${BOARDS.ARTISTS}, item_id: ${artistId}, column_id: "${ARTIST_BANK_DETAILS_COLUMN_ID}", value: ${JSON.stringify(JSON.stringify(bankDetails))}) { id } }`
+    `mutation ($boardId: ID!, $itemId: ID!, $columnValues: JSON!) {
+      change_multiple_column_values(board_id: $boardId, item_id: $itemId, column_values: $columnValues) { id }
+    }`,
+    {
+      boardId: String(BOARDS.ARTISTS),
+      itemId: String(artistId),
+      columnValues: JSON.stringify({
+        [ARTIST_BANK_DETAILS_COLUMN_ID]: legacy,
+        [ARTIST_BANK_BENEFICIARY_COLUMN_ID]: beneficiary,
+        [ARTIST_BANK_CODE_COLUMN_ID]: code,
+        [ARTIST_BANK_BRANCH_COLUMN_ID]: branch,
+        [ARTIST_BANK_ACCOUNT_COLUMN_ID]: account,
+      }),
+    }
   );
 }
 
@@ -1362,9 +1480,15 @@ export interface InvoiceItemDto {
   status: string;
   date: string;
   amount: number;       // expected (system calculated)
-  actualAmount: number; // from uploaded invoice file (AI)
+  actualAmount: number; // backward-compat: reported amount (client form)
+  extractedAmount: number; // AI extracted amount
+  reportedAmount: number; // client-submitted amount
   invoiceNumber: string;
   bankDetails: string;
+  beneficiaryName: string;
+  bankCode: string;
+  bankBranch: string;
+  bankAccount: string;
   amountNote: string;
   description: string;
   orderIds: string[];
@@ -1375,9 +1499,14 @@ export async function createInvoiceItem(params: {
   artistName: string;
   orderIds: string[];
   amount: number;          // expected amount (system calculated)
-  actualAmount?: number;   // amount from uploaded invoice file (AI extracted)
+  actualAmount?: number;   // amount sent from client form (reported)
+  extractedAmount?: number; // amount extracted from invoice file (AI/server)
   invoiceNumber: string;   // invoice/receipt number (AI extracted)
   bankDetails: string;
+  beneficiaryName: string;
+  bankCode: string;
+  bankBranch: string;
+  bankAccount: string;
   amountNote: string;      // explanation if amount differs
   description: string;     // invoice description / details
   eventDate: string;
@@ -1388,9 +1517,14 @@ export async function createInvoiceItem(params: {
   const colValues: Record<string, unknown> = {};
   if (params.eventDate) colValues["date"] = { date: params.eventDate };
   if (params.amount) colValues[INVOICE_AMOUNT_EXPECTED_COLUMN_ID] = params.amount;
-  if (params.actualAmount != null) colValues[INVOICE_AMOUNT_ACTUAL_COLUMN_ID] = params.actualAmount;
+  if (params.extractedAmount != null) colValues[INVOICE_AMOUNT_EXTRACTED_COLUMN_ID] = params.extractedAmount;
+  if (params.actualAmount != null) colValues[INVOICE_AMOUNT_REPORTED_COLUMN_ID] = params.actualAmount;
   if (params.invoiceNumber) colValues[INVOICE_NUMBER_COLUMN_ID] = params.invoiceNumber;
   if (params.bankDetails) colValues["text9"] = params.bankDetails;
+  if (params.beneficiaryName) colValues[INVOICE_BANK_BENEFICIARY_COLUMN_ID] = params.beneficiaryName;
+  if (params.bankCode) colValues[INVOICE_BANK_CODE_COLUMN_ID] = params.bankCode;
+  if (params.bankBranch) colValues[INVOICE_BANK_BRANCH_COLUMN_ID] = params.bankBranch;
+  if (params.bankAccount) colValues[INVOICE_BANK_ACCOUNT_COLUMN_ID] = params.bankAccount;
   if (params.amountNote) colValues[INVOICE_AMOUNT_NOTE_COLUMN_ID] = params.amountNote;
   if (params.description) colValues[INVOICE_DESCRIPTION_COLUMN_ID] = params.description;
   colValues[INVOICE_ORDER_IDS_COLUMN_ID] = JSON.stringify(params.orderIds);
@@ -1461,7 +1595,7 @@ export async function getArtistInvoices(artistId: string): Promise<InvoiceItemDt
           items {
             id
             name
-            column_values(ids: ["status8", "date", "${INVOICE_AMOUNT_EXPECTED_COLUMN_ID}", "${INVOICE_AMOUNT_ACTUAL_COLUMN_ID}", "${INVOICE_NUMBER_COLUMN_ID}", "text9", "${INVOICE_AMOUNT_NOTE_COLUMN_ID}", "${INVOICE_DESCRIPTION_COLUMN_ID}", "${INVOICE_ORDER_IDS_COLUMN_ID}", "${INVOICE_ARTIST_RELATION_COLUMN_ID}", "${INVOICE_ORDER_RELATION_COLUMN_ID}"]) {
+            column_values(ids: ["status8", "date", "${INVOICE_AMOUNT_EXPECTED_COLUMN_ID}", "${INVOICE_AMOUNT_EXTRACTED_COLUMN_ID}", "${INVOICE_AMOUNT_REPORTED_COLUMN_ID}", "${INVOICE_NUMBER_COLUMN_ID}", "text9", "${INVOICE_BANK_BENEFICIARY_COLUMN_ID}", "${INVOICE_BANK_CODE_COLUMN_ID}", "${INVOICE_BANK_BRANCH_COLUMN_ID}", "${INVOICE_BANK_ACCOUNT_COLUMN_ID}", "${INVOICE_AMOUNT_NOTE_COLUMN_ID}", "${INVOICE_DESCRIPTION_COLUMN_ID}", "${INVOICE_ORDER_IDS_COLUMN_ID}", "${INVOICE_ARTIST_RELATION_COLUMN_ID}", "${INVOICE_ORDER_RELATION_COLUMN_ID}"]) {
               id text value
             }
           }
@@ -1482,7 +1616,8 @@ export async function getArtistInvoices(artistId: string): Promise<InvoiceItemDt
     .map((item) => {
       const dateCol = getColumnValue(item, "date");
       const expectedAmountCol = getColumnValue(item, INVOICE_AMOUNT_EXPECTED_COLUMN_ID);
-      const actualAmountCol = getColumnValue(item, INVOICE_AMOUNT_ACTUAL_COLUMN_ID);
+      const extractedAmountCol = getColumnValue(item, INVOICE_AMOUNT_EXTRACTED_COLUMN_ID);
+      const reportedAmountCol = getColumnValue(item, INVOICE_AMOUNT_REPORTED_COLUMN_ID);
       const orderCol = getColumnValue(item, INVOICE_ORDER_RELATION_COLUMN_ID);
       return {
         id: item.id,
@@ -1490,9 +1625,15 @@ export async function getArtistInvoices(artistId: string): Promise<InvoiceItemDt
         status: getColumnValue(item, "status8")?.text || "",
         date: parseMondayDateValue(dateCol?.value) || dateCol?.text || "",
         amount: parseFloat(expectedAmountCol?.text || "0") || 0,
-        actualAmount: parseFloat(actualAmountCol?.text || "0") || 0,
+        actualAmount: parseFloat(reportedAmountCol?.text || "0") || 0,
+        extractedAmount: parseFloat(extractedAmountCol?.text || "0") || 0,
+        reportedAmount: parseFloat(reportedAmountCol?.text || "0") || 0,
         invoiceNumber: getColumnValue(item, INVOICE_NUMBER_COLUMN_ID)?.text || "",
         bankDetails: getColumnValue(item, "text9")?.text || "",
+        beneficiaryName: getColumnValue(item, INVOICE_BANK_BENEFICIARY_COLUMN_ID)?.text || "",
+        bankCode: getColumnValue(item, INVOICE_BANK_CODE_COLUMN_ID)?.text || "",
+        bankBranch: getColumnValue(item, INVOICE_BANK_BRANCH_COLUMN_ID)?.text || "",
+        bankAccount: getColumnValue(item, INVOICE_BANK_ACCOUNT_COLUMN_ID)?.text || "",
         amountNote: getColumnValue(item, INVOICE_AMOUNT_NOTE_COLUMN_ID)?.text || "",
         description: getColumnValue(item, INVOICE_DESCRIPTION_COLUMN_ID)?.text || "",
         orderIds: (() => {
@@ -1513,6 +1654,28 @@ export async function markSubitemsInvoiceSubmitted(subitemIds: string[]): Promis
             item_id: ${id},
             column_id: "color_mm3pd8vf",
             value: ${JSON.stringify(JSON.stringify({ label: "הוגשה" }))}
+          ) { id }
+        }`
+      )
+    )
+  );
+}
+
+export async function linkSubitemsToInvoice(
+  subitemIds: string[],
+  invoiceItemId: string
+): Promise<void> {
+  if (!invoiceItemId || subitemIds.length === 0) return;
+  const relationValue = JSON.stringify(JSON.stringify({ item_ids: [parseInt(invoiceItemId, 10)] }));
+  await Promise.all(
+    subitemIds.map((id) =>
+      mondayQuery(
+        `mutation {
+          change_column_value(
+            board_id: ${BOARDS.SUBITEMS},
+            item_id: ${id},
+            column_id: "${SUBITEM_INVOICE_RELATION_COLUMN_ID}",
+            value: ${relationValue}
           ) { id }
         }`
       )

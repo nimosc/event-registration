@@ -75,16 +75,20 @@ function CollapsibleSection({
       >
         <div className={`w-1 h-4 ${accentColor} rounded-full flex-shrink-0`} />
         <h2 className={`text-sm font-semibold uppercase tracking-wide ${labelColor ?? "text-gray-700"}`}>{label}</h2>
+        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${countBg ?? "bg-gray-100"} ${countColor ?? "text-gray-500"}`}>{count}</span>
+        <span className="flex-1" />
         <svg
           className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor"
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
-        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${countBg ?? "bg-gray-100"} ${countColor ?? "text-gray-500"}`}>{count}</span>
-        <span className="flex-1" />
       </button>
-      {open && children}
+      <div className={`grid transition-all duration-300 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
+        <div className="overflow-hidden">
+          <div className="pb-1">{children}</div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -486,7 +490,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
                     onClick={() => setSelectedLocation("all")}
                     className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                       selectedLocation === "all"
-                        ? "bg-indigo-600 text-white shadow-sm"
+                        ? "bg-gray-900 text-white shadow-sm"
                         : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
                     }`}
                   >
@@ -498,7 +502,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
                       onClick={() => setSelectedLocation(loc)}
                       className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         selectedLocation === loc
-                          ? "bg-indigo-600 text-white shadow-sm"
+                          ? "bg-gray-900 text-white shadow-sm"
                           : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
                       }`}
                     >

@@ -3,10 +3,13 @@ import {
   updateAttendanceConfirmation,
   updateCandidacyConfirmation,
   getOrderAdminSnapshotById,
+  getOrderById,
+  getColumnValue,
   getArtistByIdBasic,
   getCandidacyDateConflictForSubitem,
   updateOrderStatus,
-  STATUS_CANDIDACY_CLOSED,
+  getOrderCapacityState,
+  getCandidacyOrderStatusFromCapacity,
   STATUS_ASSIGNMENT_DONE,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
@@ -98,11 +101,34 @@ export async function PATCH(request: NextRequest) {
         const { requiredCount, requiredOdtCount, status: currentStatus, subitems } = orderDto;
         const totalRequired = requiredCount + (requiredOdtCount ?? 0);
         const confirmedCount = subitems.filter((s) => s.candidacyStatus === "מאושר").length;
+        let nextStatus = currentStatus;
 
         if (action === "confirm" && totalRequired > 0 && confirmedCount >= totalRequired) {
           await updateOrderStatus(orderId, STATUS_ASSIGNMENT_DONE);
-        } else if (action === "reject" && currentStatus === STATUS_ASSIGNMENT_DONE) {
-          await updateOrderStatus(orderId, STATUS_CANDIDACY_CLOSED);
+          nextStatus = STATUS_ASSIGNMENT_DONE;
+        } else {
+          const liveOrder = await getOrderById(orderId);
+          if (liveOrder) {
+            const requiredCol = getColumnValue(liveOrder, "numeric_mm185aw7");
+            const requiredOdtCol = getColumnValue(liveOrder, "numeric_mm387qc7");
+            const artistAssignedCol = getColumnValue(liveOrder, "numeric_mm18d914");
+            const odtAssignedCol = getColumnValue(liveOrder, "numeric_mm3b6rnr");
+            const requiredArtist = parseFloat(requiredCol?.text || "0") || 0;
+            const requiredOdt = parseFloat(requiredOdtCol?.text || "0") || 0;
+            const assignedArtist = parseFloat(artistAssignedCol?.text || "0") || 0;
+            const assignedOdt = parseFloat(odtAssignedCol?.text || "0") || 0;
+            const capacity = getOrderCapacityState(
+              requiredArtist,
+              assignedArtist,
+              requiredOdt,
+              assignedOdt
+            );
+            const desiredStatus = getCandidacyOrderStatusFromCapacity(capacity, currentStatus);
+            if (desiredStatus !== currentStatus) {
+              await updateOrderStatus(orderId, desiredStatus);
+              nextStatus = desiredStatus;
+            }
+          }
         }
 
         const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
@@ -119,7 +145,7 @@ export async function PATCH(request: NextRequest) {
               event: action === "confirm" ? "candidacy_approved" : "candidacy_rejected",
               decidedAt: new Date().toISOString(),
               admin: { id: session.id, name: session.name },
-              order: orderDto,
+              order: { ...orderDto, status: nextStatus },
               registration,
               artist,
             });

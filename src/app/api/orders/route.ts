@@ -14,6 +14,8 @@ import {
   parseDropdownLabel,
   mapMondayAttendanceToInternal,
   getLiveArtistRole,
+  getOrderCapacityState,
+  isRegistrationOpenForRole,
 } from "@/lib/monday";
 import { getSession, createSession, setSessionCookie } from "@/lib/auth";
 
@@ -31,6 +33,7 @@ export interface OrderData {
   odtRequired: number;
   odtAssigned: number;
   spotsRemaining: number;
+  isRoleOpen: boolean;
   isRegistered: boolean;
   subitemId?: string;
   subitems: SubitemData[];
@@ -85,8 +88,14 @@ export async function GET() {
         const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
         const odtRequired = parseFloat(odtRequiredCol?.text || "0") || 0;
         const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
-        const artistCapacity = requiredCount > 0 ? Math.ceil(requiredCount * 1.5) : 0;
-        const odtCapacity = odtRequired > 0 ? Math.ceil(odtRequired * 1.5) : 0;
+        const capacity = getOrderCapacityState(
+          requiredCount,
+          assignedCount,
+          odtRequired,
+          odtAssigned
+        );
+        const artistCapacity = capacity.artist.capacityLimit;
+        const odtCapacity = capacity.odt.capacityLimit;
 
         const subitems: SubitemData[] = (item.subitems || []).map((sub) => {
           const relationCol = sub.column_values.find(
@@ -124,6 +133,10 @@ export async function GET() {
           assignedCount,
           odtRequired,
           odtAssigned,
+          isRoleOpen: isRegistrationOpenForRole(
+            session.role === "ODT" ? "ODT" : "אומן",
+            capacity
+          ),
           spotsRemaining: session.role === "ODT"
             ? (odtCapacity > 0 ? Math.max(0, odtCapacity - odtAssigned) : 999)
             : (artistCapacity > 0 ? Math.max(0, artistCapacity - assignedCount) : 999),
