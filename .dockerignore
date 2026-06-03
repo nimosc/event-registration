@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.gitignore
+.cursor
+*.md
+.env*
+!.env.local.example
+npm-debug.log*
+.DS_Store
+coverage
+playwright-report
+test-results
+e2e

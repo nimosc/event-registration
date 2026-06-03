@@ -472,50 +472,8 @@ export function parseLinkedItemIds(value: string | null | undefined): number[] {
       }
     }
 
-    const result = Array.from(ids);
-    // #region agent log
-    console.log("[DBG H1] parseLinkedItemIds", {
-      hasLinkedPulseIds: Array.isArray(parsed.linkedPulseIds),
-      hasLinkedItemIds: Array.isArray(parsed.linked_item_ids),
-      hasItemIds: Array.isArray(parsed.item_ids),
-      parsedIdsCount: result.length,
-    });
-    fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
-      body: JSON.stringify({
-        sessionId: "8e21a1",
-        runId: "initial",
-        hypothesisId: "H1",
-        location: "src/lib/monday.ts:parseLinkedItemIds",
-        message: "Parsed linked artist ids from relation value",
-        data: {
-          hasLinkedPulseIds: Array.isArray(parsed.linkedPulseIds),
-          hasLinkedItemIds: Array.isArray(parsed.linked_item_ids),
-          hasItemIds: Array.isArray(parsed.item_ids),
-          parsedIdsCount: result.length,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-    return result;
+    return Array.from(ids);
   } catch {
-    // #region agent log
-    fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
-      body: JSON.stringify({
-        sessionId: "8e21a1",
-        runId: "initial",
-        hypothesisId: "H1",
-        location: "src/lib/monday.ts:parseLinkedItemIds",
-        message: "Failed to parse relation value JSON",
-        data: {},
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return [];
   }
 }
@@ -739,6 +697,35 @@ export async function getAllOrders() {
   return data.boards[0]?.items_page?.items ?? [];
 }
 
+export async function getOrdersByIdsForInvoice(orderIds: string[]): Promise<MondayItem[]> {
+  const numericIds = orderIds
+    .map((id) => parseInt(id, 10))
+    .filter((id) => Number.isFinite(id) && id > 0);
+
+  if (numericIds.length === 0) return [];
+
+  const query = `
+    query {
+      items(ids: [${numericIds.join(",")}]) {
+        id
+        name
+        subitems {
+          id
+          name
+          column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3pd8vf"]) {
+            id
+            text
+            value
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await mondayQuery<{ items: MondayItem[] }>(query);
+  return data.items ?? [];
+}
+
 /** Admin orders API shape — shared by getAllOrders mapping and getOrderAdminSnapshotById */
 export interface AdminOrderSubitem {
   id: string;
@@ -826,13 +813,6 @@ function buildApprovedArtistDateIndex(orders: AdminOrderDto[]): Map<string, Appr
       index.set(key, list);
     }
   }
-  // #region agent log
-  console.log("[DBG H7] approvedIndexSummary", {
-    approvedWithArtistId,
-    approvedWithoutArtistId,
-    indexKeysCount: index.size,
-  });
-  // #endregion
   return index;
 }
 
@@ -849,38 +829,6 @@ export function withCandidacyDateConflictFlags(orders: AdminOrderDto[]): AdminOr
         const key = `${artistKey}::${dateKey}`;
         const approvedOnSameDate = approvedIndex.get(key) ?? [];
         const conflict = approvedOnSameDate.find((entry) => entry.orderId !== order.id);
-        // #region agent log
-        console.log("[DBG H3] conflictEval", {
-          orderId: order.id,
-          subitemId: sub.id,
-          artistKey,
-          dateKey,
-          approvedOnSameDateCount: approvedOnSameDate.length,
-          hasConflict: Boolean(conflict),
-          conflictOrderId: conflict?.orderId || "",
-        });
-        fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
-          body: JSON.stringify({
-            sessionId: "8e21a1",
-            runId: "initial",
-            hypothesisId: "H3",
-            location: "src/lib/monday.ts:withCandidacyDateConflictFlags",
-            message: "Evaluated conflict for subitem",
-            data: {
-              orderId: order.id,
-              subitemId: sub.id,
-              artistKey,
-              dateKey,
-              approvedOnSameDateCount: approvedOnSameDate.length,
-              hasConflict: Boolean(conflict),
-              conflictOrderId: conflict?.orderId || "",
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (!conflict) {
           return {
             ...sub,
@@ -932,34 +880,6 @@ export async function getAllOrdersWithCandidacyDateConflicts(): Promise<AdminOrd
       return { ...sub, artistType: byId ?? byName ?? "" };
     }),
   }));
-  // #region agent log
-  console.log("[DBG H4] ordersWithConflicts", {
-    ordersCount: withFlags.length,
-    flaggedSubitemsCount: withFlags.reduce(
-      (sum, o) => sum + o.subitems.filter((s) => s.hasCandidacyDateConflict).length,
-      0
-    ),
-  });
-  fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
-    body: JSON.stringify({
-      sessionId: "8e21a1",
-      runId: "initial",
-      hypothesisId: "H4",
-      location: "src/lib/monday.ts:getAllOrdersWithCandidacyDateConflicts",
-      message: "Computed orders with conflict flags summary",
-      data: {
-        ordersCount: withTypes.length,
-        flaggedSubitemsCount: withTypes.reduce(
-          (sum, o) => sum + o.subitems.filter((s) => s.hasCandidacyDateConflict).length,
-          0
-        ),
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   return withTypes;
 }
 
@@ -973,44 +893,8 @@ export async function getCandidacyDateConflictForSubitem(
   const subitem = order.subitems.find((s) => s.id === subitemId);
   if (!subitem) return { hasConflict: false };
   if (!subitem.hasCandidacyDateConflict) {
-    // #region agent log
-    console.log("[DBG H5] guardNoConflict", { orderId, subitemId });
-    fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
-      body: JSON.stringify({
-        sessionId: "8e21a1",
-        runId: "initial",
-        hypothesisId: "H5",
-        location: "src/lib/monday.ts:getCandidacyDateConflictForSubitem",
-        message: "Confirm guard lookup found no conflict",
-        data: { orderId, subitemId },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return { hasConflict: false };
   }
-  // #region agent log
-  console.log("[DBG H5] guardConflict", {
-    orderId,
-    subitemId,
-    message: subitem.candidacyDateConflictMessage || "",
-  });
-  fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
-    body: JSON.stringify({
-      sessionId: "8e21a1",
-      runId: "initial",
-      hypothesisId: "H5",
-      location: "src/lib/monday.ts:getCandidacyDateConflictForSubitem",
-      message: "Confirm guard lookup found conflict",
-      data: { orderId, subitemId, message: subitem.candidacyDateConflictMessage || "" },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   return {
     hasConflict: true,
     message: subitem.candidacyDateConflictMessage || "לא ניתן לאשר - האומן כבר מאושר באירוע אחר באותו תאריך",
@@ -1043,7 +927,7 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
     const artistTypeCol = sub.column_values.find((cv) => cv.id === "color_mm3bjfvg");
 
     const linkedArtistIds = parseLinkedItemIds(relationCol?.value);
-    const mapped = {
+    return {
       id: sub.id,
       name: sub.name,
       linkedArtistIds,
@@ -1052,45 +936,9 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
       attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
       candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
     };
-    // #region agent log
-    console.log("[DBG H8] subitemMapping", {
-      orderId: item.id,
-      subitemId: mapped.id,
-      linkedArtistIdsCount: linkedArtistIds.length,
-      firstArtistId: linkedArtistIds[0] || null,
-      candidacyStatus: mapped.candidacyStatus || "",
-    });
-    // #endregion
-    return mapped;
   });
 
   const isoDate = parseMondayDateValue(dateCol?.value);
-  // #region agent log
-  console.log("[DBG H2] mapOrderDate", {
-    orderId: item.id,
-    hasDateValue: Boolean(dateCol?.value),
-    dateText: dateCol?.text || "",
-    isoDate,
-  });
-  fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8e21a1" },
-    body: JSON.stringify({
-      sessionId: "8e21a1",
-      runId: "initial",
-      hypothesisId: "H2",
-      location: "src/lib/monday.ts:mapMondayOrderItemToAdminOrder",
-      message: "Mapped order date source",
-      data: {
-        orderId: item.id,
-        hasDateValue: Boolean(dateCol?.value),
-        dateText: dateCol?.text || "",
-        isoDate,
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   return {
     id: item.id,
     name: item.name,
@@ -1474,6 +1322,62 @@ export async function createIssueReport(input: IssueReportInput): Promise<{ item
 
 // ─── Invoices board ───────────────────────────────────────────────────────────
 
+/** YYYY-MM → MM/YYYY (Monday group title) */
+export function monthKeyToInvoiceGroupTitle(monthKey: string): string | null {
+  const match = monthKey.trim().match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  return `${match[2]}/${match[1]}`;
+}
+
+/** Event date YYYY-MM-DD → MM/YYYY */
+export function eventDateToInvoiceGroupTitle(eventDate: string): string | null {
+  const match = eventDate.trim().match(/^(\d{4})-(\d{2})/);
+  if (!match) return null;
+  return `${match[2]}/${match[1]}`;
+}
+
+export function resolveInvoiceGroupTitle(monthKey: string, eventDate: string): string {
+  return (
+    monthKeyToInvoiceGroupTitle(monthKey) ??
+    eventDateToInvoiceGroupTitle(eventDate) ??
+    monthKeyToInvoiceGroupTitle(getCurrentMonthKey())!
+  );
+}
+
+function getCurrentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+async function ensureInvoiceMonthGroup(
+  boardId: number,
+  groupTitle: string
+): Promise<string> {
+  const boardsData = await mondayQuery<{
+    boards: Array<{ groups: Array<{ id: string; title: string }> }>;
+  }>(
+    `query ($boardIds: [ID!]) {
+      boards(ids: $boardIds) {
+        groups { id title }
+      }
+    }`,
+    { boardIds: [String(boardId)] }
+  );
+
+  const groups = boardsData.boards[0]?.groups ?? [];
+  const existing = groups.find((g) => g.title.trim() === groupTitle);
+  if (existing) return existing.id;
+
+  const created = await mondayQuery<{ create_group: { id: string } }>(
+    `mutation ($boardId: ID!, $groupName: String!) {
+      create_group(board_id: $boardId, group_name: $groupName) { id }
+    }`,
+    { boardId: String(boardId), groupName: groupTitle }
+  );
+
+  return created.create_group.id;
+}
+
 export interface InvoiceItemDto {
   id: string;
   name: string;
@@ -1511,14 +1415,24 @@ export async function createInvoiceItem(params: {
   description: string;     // invoice description / details
   eventDate: string;
   monthLabel: string;
+  monthKey: string;
 }): Promise<{ id: string }> {
   const itemName = `חשבונית - ${params.monthLabel} - ${params.artistName}`;
+  const groupTitle = resolveInvoiceGroupTitle(params.monthKey, params.eventDate);
+  const groupId = await ensureInvoiceMonthGroup(BOARDS.INVOICES, groupTitle);
 
   const colValues: Record<string, unknown> = {};
-  if (params.eventDate) colValues["date"] = { date: params.eventDate };
+  const invoiceDate =
+    monthKeyToInvoiceGroupTitle(params.monthKey) != null
+      ? `${params.monthKey.trim()}-01`
+      : params.eventDate;
+  if (invoiceDate) colValues["date"] = { date: invoiceDate };
   if (params.amount) colValues[INVOICE_AMOUNT_EXPECTED_COLUMN_ID] = params.amount;
   if (params.extractedAmount != null) colValues[INVOICE_AMOUNT_EXTRACTED_COLUMN_ID] = params.extractedAmount;
-  if (params.actualAmount != null) colValues[INVOICE_AMOUNT_REPORTED_COLUMN_ID] = params.actualAmount;
+  const reportedAmountToSave = params.actualAmount ?? params.amount;
+  if (reportedAmountToSave != null) {
+    colValues[INVOICE_AMOUNT_REPORTED_COLUMN_ID] = reportedAmountToSave;
+  }
   if (params.invoiceNumber) colValues[INVOICE_NUMBER_COLUMN_ID] = params.invoiceNumber;
   if (params.bankDetails) colValues["text9"] = params.bankDetails;
   if (params.beneficiaryName) colValues[INVOICE_BANK_BENEFICIARY_COLUMN_ID] = params.beneficiaryName;
@@ -1530,10 +1444,20 @@ export async function createInvoiceItem(params: {
   colValues[INVOICE_ORDER_IDS_COLUMN_ID] = JSON.stringify(params.orderIds);
 
   const createData = await mondayQuery<{ create_item: { id: string } }>(
-    `mutation ($boardId: ID!, $itemName: String!, $colValues: JSON!) {
-      create_item(board_id: $boardId, item_name: $itemName, column_values: $colValues) { id }
+    `mutation ($boardId: ID!, $groupId: String!, $itemName: String!, $colValues: JSON!) {
+      create_item(
+        board_id: $boardId,
+        group_id: $groupId,
+        item_name: $itemName,
+        column_values: $colValues
+      ) { id }
     }`,
-    { boardId: String(BOARDS.INVOICES), itemName, colValues: JSON.stringify(colValues) }
+    {
+      boardId: String(BOARDS.INVOICES),
+      groupId,
+      itemName,
+      colValues: JSON.stringify(colValues),
+    }
   );
 
   const invoiceId = createData.create_item.id;
@@ -1608,7 +1532,7 @@ export async function getArtistInvoices(artistId: string): Promise<InvoiceItemDt
   const items = data.boards[0]?.items_page?.items ?? [];
   const artistNum = parseInt(artistId, 10);
 
-  return items
+  const mapped = items
     .filter((item) => {
       const col = getColumnValue(item, INVOICE_ARTIST_RELATION_COLUMN_ID);
       return parseLinkedItemIds(col?.value).includes(artistNum);
@@ -1619,7 +1543,7 @@ export async function getArtistInvoices(artistId: string): Promise<InvoiceItemDt
       const extractedAmountCol = getColumnValue(item, INVOICE_AMOUNT_EXTRACTED_COLUMN_ID);
       const reportedAmountCol = getColumnValue(item, INVOICE_AMOUNT_REPORTED_COLUMN_ID);
       const orderCol = getColumnValue(item, INVOICE_ORDER_RELATION_COLUMN_ID);
-      return {
+      const dto = {
         id: item.id,
         name: item.name,
         status: getColumnValue(item, "status8")?.text || "",
@@ -1637,11 +1561,58 @@ export async function getArtistInvoices(artistId: string): Promise<InvoiceItemDt
         amountNote: getColumnValue(item, INVOICE_AMOUNT_NOTE_COLUMN_ID)?.text || "",
         description: getColumnValue(item, INVOICE_DESCRIPTION_COLUMN_ID)?.text || "",
         orderIds: (() => {
-          const raw = getColumnValue(item, INVOICE_ORDER_IDS_COLUMN_ID)?.text || "";
-          try { return JSON.parse(raw) as string[]; } catch { return []; }
+          const textCol = getColumnValue(item, INVOICE_ORDER_IDS_COLUMN_ID)?.text || "";
+          try {
+            const parsed = JSON.parse(textCol) as Array<string | number>;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              return parsed.map((v) => String(v));
+            }
+          } catch {
+            // ignore and fallback to relation column
+          }
+          const relationIds = parseLinkedItemIds(orderCol?.value);
+          return relationIds.map((id) => String(id));
         })(),
       };
+      // #region agent log
+      fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6ee816" },
+        body: JSON.stringify({
+          sessionId: "6ee816",
+          runId: "run1",
+          hypothesisId: "H1",
+          location: "src/lib/monday.ts:getArtistInvoices",
+          message: "Mapped artist invoice amounts and orderIds",
+          data: {
+            invoiceId: dto.id,
+            amount: dto.amount,
+            actualAmount: dto.actualAmount,
+            reportedAmount: dto.reportedAmount,
+            orderIds: dto.orderIds,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      return dto;
     });
+  // #region agent log
+  fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6ee816" },
+    body: JSON.stringify({
+      sessionId: "6ee816",
+      runId: "run1",
+      hypothesisId: "H1",
+      location: "src/lib/monday.ts:getArtistInvoices",
+      message: "Returning artist invoices",
+      data: { artistId, invoicesCount: mapped.length },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  return mapped;
 }
 
 export async function markSubitemsInvoiceSubmitted(subitemIds: string[]): Promise<void> {

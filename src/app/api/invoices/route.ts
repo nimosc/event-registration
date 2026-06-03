@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import {
   createInvoiceItem,
   getArtistInvoices,
-  getAllOrders,
+  getOrdersByIdsForInvoice,
   mapMondayAttendanceToInternal,
   mapMondayCandidacyToInternal,
   parseLinkedItemIds,
@@ -15,6 +15,17 @@ import {
 } from "@/lib/monday";
 import { canSubmitInvoice } from "@/lib/invoiceEligibility";
 import { extractInvoiceData } from "@/lib/invoiceExtract";
+
+async function extractInvoiceDataWithTimeout(file: File, timeoutMs = 4500) {
+  try {
+    return await Promise.race([
+      extractInvoiceData(file),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  } catch {
+    return null;
+  }
+}
 
 export async function GET() {
   const session = await getSession();
@@ -43,6 +54,7 @@ export async function POST(req: NextRequest) {
   const description = (formData.get("description") as string) || "";
   const eventDate = (formData.get("eventDate") as string) || "";
   const monthLabel = (formData.get("monthLabel") as string) || "";
+  const monthKey = (formData.get("monthKey") as string) || "";
   const file = formData.get("file") as File | null;
 
   if (!orderIds.length || !amount) {
@@ -70,7 +82,7 @@ export async function POST(req: NextRequest) {
   const requestedOrderIds = new Set(orderIds);
   const eligibleOrderIds = new Set<string>();
   const eligibleSubitemIds = new Set<string>();
-  const orders = await getAllOrders();
+  const orders = await getOrdersByIdsForInvoice(orderIds);
 
   for (const order of orders) {
     if (!requestedOrderIds.has(order.id)) continue;
@@ -112,8 +124,15 @@ export async function POST(req: NextRequest) {
   }
 
   const normalizedAmountNote = amountNote.trim();
+  const reportedAmount = actualAmount ?? amount;
+  if (Math.abs(reportedAmount - amount) > 0.009 && !normalizedAmountNote) {
+    return NextResponse.json(
+      { error: "כאשר הסכום שונה מהסכום המחושב, יש למלא סיבה לשינוי" },
+      { status: 400 }
+    );
+  }
 
-  const extractedInvoice = await extractInvoiceData(file);
+  const extractedInvoice = await extractInvoiceDataWithTimeout(file);
   const extractedAmount = extractedInvoice?.amount ?? undefined;
 
   const result = await createInvoiceItem({
@@ -133,27 +152,43 @@ export async function POST(req: NextRequest) {
     description,
     eventDate,
     monthLabel,
+    monthKey,
   });
 
   await uploadFileToInvoiceItem(result.id, file, file.name);
 
-  if (subitemIds.length > 0) {
-    await linkSubitemsToInvoice(subitemIds, result.id);
-    await markSubitemsInvoiceSubmitted(subitemIds);
-  }
-
-  // Save bank details back to artist profile if changed
+  let shouldUpdateBankDetails = false;
   if (bankDetails || beneficiaryName || bankCode || bankBranch || bankAccount) {
     const current = await getArtistBankDetailsFields(session.id);
-    if (
+    shouldUpdateBankDetails =
       current.legacy !== bankDetails ||
       current.beneficiaryName !== beneficiaryName ||
       current.bankCode !== bankCode ||
       current.bankBranch !== bankBranch ||
-      current.bankAccount !== bankAccount
-    ) {
-      await updateArtistBankDetails(session.id, bankDetails, beneficiaryName, bankCode, bankBranch, bankAccount);
-    }
+      current.bankAccount !== bankAccount;
+  }
+
+  const postCreateTasks: Array<Promise<unknown>> = [];
+  if (subitemIds.length > 0) {
+    postCreateTasks.push(linkSubitemsToInvoice(subitemIds, result.id));
+    postCreateTasks.push(markSubitemsInvoiceSubmitted(subitemIds));
+  }
+
+  if (shouldUpdateBankDetails) {
+    postCreateTasks.push(
+      updateArtistBankDetails(
+        session.id,
+        bankDetails,
+        beneficiaryName,
+        bankCode,
+        bankBranch,
+        bankAccount
+      )
+    );
+  }
+
+  if (postCreateTasks.length > 0) {
+    await Promise.all(postCreateTasks);
   }
 
   return NextResponse.json({ invoiceId: result.id });

@@ -24,6 +24,7 @@ interface InvoiceDto {
   date: string;
   amount: number;
   actualAmount: number;
+  reportedAmount?: number;
   invoiceNumber: string;
   bankDetails: string;
   beneficiaryName: string;
@@ -46,8 +47,23 @@ const HEBREW_MONTHS: Record<number, string> = {
 };
 
 const FIRST_EVENT_PAY_PATUR = 1000;
-const ADDITIONAL_EVENT_PAY_PATUR = 800;
+const ADDITIONAL_EVENT_PAY_PATUR = 850;
 const PAY_MORESH = 1000;
+
+function invoiceAmountsDiffer(expected: number, reported: number): boolean {
+  return Math.abs(reported - expected) > 0.009;
+}
+
+function getReportedInvoiceAmount(
+  expected: number,
+  customAmountEnabled: boolean,
+  customAmountValue: string
+): number {
+  if (customAmountEnabled && customAmountValue !== "" && !Number.isNaN(Number(customAmountValue))) {
+    return Number(customAmountValue);
+  }
+  return expected;
+}
 
 function parseMonthKey(dateStr: string): string {
   const match = dateStr?.match(/(\d{4})-(\d{2})/);
@@ -110,7 +126,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     bankAccount: "",
   });
   const [invoices, setInvoices] = useState<InvoiceDto[]>([]);
-  const [invoiceFor, setInvoiceFor] = useState<Registration | null>(null);
   const [showMonthInvoiceModal, setShowMonthInvoiceModal] = useState(false);
   const [monthSelectedOrderIds, setMonthSelectedOrderIds] = useState<Set<string>>(new Set());
   const [invoiceForm, setInvoiceForm] = useState({
@@ -122,6 +137,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     description: "",
   });
   const [submittingInvoice, setSubmittingInvoice] = useState(false);
+  const [submittingSeconds, setSubmittingSeconds] = useState(0);
   const [invoiceSuccess, setInvoiceSuccess] = useState<string | null>(null);
   const [extractingFile, setExtractingFile] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
@@ -142,13 +158,17 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     [missingBankFields]
   );
   const getSubmitBlockingReason = useCallback(
-    (selectedCount: number) => {
+    (selectedCount: number, expectedAmount: number) => {
       if (selectedCount <= 0) return "בחר לפחות אירוע אחד";
       if (!invoiceFile) return "צרף קובץ חשבונית";
       if (missingBankFields.length > 0) return `השלם פרטי בנק: ${missingBankFields.join(", ")}`;
+      const reported = getReportedInvoiceAmount(expectedAmount, customAmountEnabled, customAmountValue);
+      if (invoiceAmountsDiffer(expectedAmount, reported) && !customAmountNote.trim()) {
+        return "סיבה לשינוי הסכום";
+      }
       return "";
     },
-    [invoiceFile, missingBankFields]
+    [customAmountEnabled, customAmountNote, customAmountValue, invoiceFile, missingBankFields]
   );
 
   const fetchData = useCallback(async () => {
@@ -180,6 +200,30 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       if (invRes.ok) {
         const invData = await invRes.json();
         setInvoices((invData.invoices ?? []) as InvoiceDto[]);
+        // #region agent log
+        fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6ee816" },
+          body: JSON.stringify({
+            sessionId: "6ee816",
+            runId: "run1",
+            hypothesisId: "H2",
+            location: "src/app/invoices/InvoicesClient.tsx:fetchData",
+            message: "Loaded invoices in client",
+            data: {
+              invoicesCount: (invData.invoices ?? []).length,
+              sample: (invData.invoices ?? []).slice(0, 5).map((inv: InvoiceDto) => ({
+                id: inv.id,
+                amount: inv.amount,
+                actualAmount: inv.actualAmount,
+                reportedAmount: inv.reportedAmount,
+                orderIds: inv.orderIds,
+              })),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
       }
     } catch {
       setError("שגיאת רשת.");
@@ -191,6 +235,18 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!submittingInvoice) {
+      setSubmittingSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setSubmittingSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 250);
+    return () => clearInterval(timer);
+  }, [submittingInvoice]);
 
   const eligibleByStatus = useMemo(
     () => registrations.filter((r) => isInvoiceStatusEligible(r)),
@@ -272,7 +328,8 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     subitemIds: string[],
     amount: number,
     eventDate: string,
-    monthLabel: string
+    monthLabel: string,
+    monthKey: string
   ) => {
     if (!orderIds.length || !subitemIds.length) {
       setError("יש לבחור לפחות אירוע אחד");
@@ -287,12 +344,18 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       return;
     }
 
+    const reportedAmount = getReportedInvoiceAmount(amount, customAmountEnabled, customAmountValue);
+    if (invoiceAmountsDiffer(amount, reportedAmount) && !customAmountNote.trim()) {
+      setError("כאשר הסכום שונה מהסכום המחושב, יש למלא סיבה לשינוי");
+      return;
+    }
+
     setSubmittingInvoice(true);
     setError(null);
     try {
-      const actualAmountToSend = customAmountEnabled && customAmountValue !== "" && !isNaN(Number(customAmountValue))
-        ? Number(customAmountValue)
-        : extractedActualAmount;
+      const actualAmountToSend = invoiceAmountsDiffer(amount, reportedAmount)
+        ? reportedAmount
+        : undefined;
 
       const fd = new FormData();
       fd.append("orderIds", JSON.stringify(orderIds));
@@ -301,6 +364,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       if (actualAmountToSend != null) fd.append("actualAmount", String(actualAmountToSend));
       fd.append("eventDate", eventDate);
       fd.append("monthLabel", monthLabel);
+      fd.append("monthKey", monthKey);
       fd.append("beneficiaryName", invoiceForm.beneficiaryName);
       fd.append("bankCode", invoiceForm.bankCode);
       fd.append("bankBranch", invoiceForm.bankBranch);
@@ -321,7 +385,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         return;
       }
 
-      setInvoiceFor(null);
       setShowMonthInvoiceModal(false);
       setInvoiceForm({ beneficiaryName: "", bankCode: "", bankBranch: "", bankAccount: "", invoiceNumber: "", description: "" });
       setInvoiceFile(null);
@@ -343,7 +406,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     } finally {
       setSubmittingInvoice(false);
     }
-  }, [customAmountEnabled, customAmountNote, customAmountValue, extractedActualAmount, fetchData, hasCompleteBankDetails, invoiceFile, invoiceForm, missingBankFields]);
+  }, [customAmountEnabled, customAmountNote, customAmountValue, fetchData, hasCompleteBankDetails, invoiceFile, invoiceForm, missingBankFields]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -354,7 +417,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">הגשת חשבוניות</h1>
-              <p className="text-sm text-gray-500 mt-1">כאן מגישים חשבוניות עבור האירועים שלך</p>
+              <p className="text-sm text-gray-500 mt-1">הגשת חשבונית מתבצעת פעם בחודש מהכפתור בראש הטבלה</p>
             </div>
             <button
               onClick={fetchData}
@@ -493,14 +556,50 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">תאריך</th>
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">סטטוס נוכחות</th>
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">סכום</th>
+                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">הסכום שדווח</th>
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">סטטוס חשבונית</th>
-                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">פעולות</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map((reg) => {
                     const amount = incomeBySubitemId[reg.subitemId] ?? 0;
                     const isSubmitted = reg.invoiceStatus === "הוגשה";
+                    const regOrderId = String(reg.orderId);
+                    const relatedInvoice = invoices.find((inv) =>
+                      (inv.orderIds || []).some((id) => String(id) === regOrderId)
+                    );
+                    const reportedAmountForRow =
+                      relatedInvoice?.reportedAmount != null && !Number.isNaN(relatedInvoice.reportedAmount)
+                        ? relatedInvoice.reportedAmount
+                        : null;
+                    const displayAmount = isSubmitted && reportedAmountForRow != null
+                      ? reportedAmountForRow
+                      : amount;
+                    // #region agent log
+                    if (isSubmitted) {
+                      fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6ee816" },
+                        body: JSON.stringify({
+                          sessionId: "6ee816",
+                          runId: "run1",
+                          hypothesisId: "H3",
+                          location: "src/app/invoices/InvoicesClient.tsx:tableRow",
+                          message: "Computed submitted row display amount",
+                          data: {
+                            regOrderId,
+                            calculatedAmount: amount,
+                            matchedInvoiceId: relatedInvoice?.id || "",
+                            matchedInvoiceOrderIds: relatedInvoice?.orderIds || [],
+                            matchedReportedAmount: relatedInvoice?.reportedAmount ?? null,
+                            matchedActualAmount: relatedInvoice?.actualAmount ?? null,
+                            finalDisplayAmount: displayAmount,
+                          },
+                          timestamp: Date.now(),
+                        }),
+                      }).catch(() => {});
+                    }
+                    // #endregion
                     return (
                       <tr key={reg.subitemId} className="hover:bg-gray-50/70 transition-colors">
                         <td className="px-5 py-4 font-medium text-gray-900">{reg.location || reg.orderName || "—"}</td>
@@ -508,7 +607,12 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                         <td className="px-5 py-4">
                           <AttendanceBadge status={reg.attendanceStatus} />
                         </td>
-                        <td className="px-5 py-4 text-gray-700 tabular-nums">{amount.toLocaleString("he-IL")} ₪</td>
+                        <td className="px-5 py-4 text-gray-700 tabular-nums">{displayAmount.toLocaleString("he-IL")} ₪</td>
+                        <td className="px-5 py-4 text-gray-700 tabular-nums">
+                          {reportedAmountForRow != null
+                            ? `${reportedAmountForRow.toLocaleString("he-IL")} ₪`
+                            : "—"}
+                        </td>
                         <td className="px-5 py-4">
                           {isSubmitted ? (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
@@ -518,34 +622,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200">
                               טרם הוגשה
                             </span>
-                          )}
-                        </td>
-                        <td className="px-5 py-4">
-                          {isSubmitted ? (
-                            <span className="text-xs text-gray-400">כבר הוגשה</span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setInvoiceFor(reg);
-                                setInvoiceForm({
-                                  beneficiaryName: artistBankDetails.beneficiaryName,
-                                  bankCode: artistBankDetails.bankCode,
-                                  bankBranch: artistBankDetails.bankBranch,
-                                  bankAccount: artistBankDetails.bankAccount,
-                                  invoiceNumber: "",
-                                  description: "",
-                                });
-                                setInvoiceFile(null);
-                                setCustomAmountEnabled(false);
-                                setCustomAmountValue("");
-                                setCustomAmountNote("");
-                                setExtractedActualAmount(null);
-                              }}
-                              className="btn-secondary text-xs py-2 px-3 rounded-lg min-w-[88px]"
-                            >
-                              חשבונית
-                            </button>
                           )}
                         </td>
                       </tr>
@@ -571,16 +647,24 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {invoices.map((inv) => (
+                  (() => {
+                    const displayAmount =
+                      inv.reportedAmount != null && !Number.isNaN(inv.reportedAmount)
+                        ? inv.reportedAmount
+                        : inv.amount;
+                    return (
                   <tr key={inv.id}>
                     <td className="px-4 py-3 font-medium text-gray-800">{inv.name}</td>
                     <td className="px-4 py-3 text-gray-500 tabular-nums">{formatDateDDMMYY(inv.date)}</td>
-                    <td className="px-4 py-3 font-semibold text-gray-800 tabular-nums">{inv.amount.toLocaleString("he-IL")} ₪</td>
+                    <td className="px-4 py-3 font-semibold text-gray-800 tabular-nums">{displayAmount.toLocaleString("he-IL")} ₪</td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-gray-50 text-gray-600 border-gray-200">
                         {inv.status || "ממתין"}
                       </span>
                     </td>
                   </tr>
+                    );
+                  })()
                 ))}
               </tbody>
             </table>
@@ -604,16 +688,22 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           const selectedOrderIds = Array.from(monthSelectedOrderIds);
           const selectedSubitemIds = selectedRegs.map((r) => r.subitemId);
           const firstDate = selectedRegs[0]?.date || filtered[0]?.date || "";
-          const submitBlockReason = getSubmitBlockingReason(selectedOrderIds.length);
-          const effectiveAmount = customAmountEnabled && customAmountValue !== "" && !isNaN(Number(customAmountValue))
-            ? Number(customAmountValue)
-            : monthTotal;
+          const reportedAmount = getReportedInvoiceAmount(monthTotal, customAmountEnabled, customAmountValue);
+          const amountChanged = invoiceAmountsDiffer(monthTotal, reportedAmount);
+          const submitBlockReason = getSubmitBlockingReason(selectedOrderIds.length, monthTotal);
+          const effectiveAmount = reportedAmount;
           return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowMonthInvoiceModal(false)}>
               <div className="relative bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden border border-gray-200 flex flex-col" onClick={(e) => e.stopPropagation()}>
                 {submittingInvoice && (
-                  <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center gap-3 rounded-2xl">
-                    <span className="text-sm font-medium text-gray-600">מגיש חשבונית...</span>
+                  <div className="absolute inset-0 z-10 bg-white/90 flex flex-col items-center justify-center gap-3 rounded-2xl px-6 text-center">
+                    <span className="h-8 w-8 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
+                    <span className="text-base font-semibold text-gray-800">ההגשה בבדיקה</span>
+                    <span className="text-sm text-gray-600">זה עשוי לקחת כ-15 שניות</span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-800 tabular-nums">
+                      <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                      {submittingSeconds} שניות
+                    </span>
                   </div>
                 )}
                 <div className="p-6 border-b border-gray-200">
@@ -680,11 +770,23 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                     <div className={hasCompleteBankDetails ? "text-emerald-700" : "text-amber-700"}>
                       {hasCompleteBankDetails ? "✓" : "•"} פרטי חשבון בנק מלאים
                     </div>
+                    {amountChanged && (
+                      <div className={customAmountNote.trim() ? "text-emerald-700" : "text-amber-700"}>
+                        {customAmountNote.trim() ? "✓" : "•"} סיבה לשינוי הסכום
+                      </div>
+                    )}
                   </div>
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
-                      handleSubmitInvoice(selectedOrderIds, selectedSubitemIds, monthTotal, firstDate, monthKeyToLabel(selectedMonth));
+                      handleSubmitInvoice(
+                        selectedOrderIds,
+                        selectedSubitemIds,
+                        monthTotal,
+                        firstDate,
+                        monthKeyToLabel(selectedMonth),
+                        selectedMonth
+                      );
                     }}
                     className="space-y-4"
                   >
@@ -817,13 +919,21 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                             value={customAmountValue}
                             onChange={(e) => setCustomAmountValue(e.target.value)}
                           />
-                          <input
-                            type="text"
-                            className="input-field text-sm"
-                            placeholder="סיבה לשינוי הסכום"
-                            value={customAmountNote}
-                            onChange={(e) => setCustomAmountNote(e.target.value)}
-                          />
+                          {amountChanged && (
+                            <div>
+                              <label className="text-sm font-medium text-gray-700">
+                                סיבה לשינוי הסכום <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                className="input-field text-sm mt-1"
+                                placeholder="למה הסכום בחשבונית שונה מהסכום המחושב?"
+                                value={customAmountNote}
+                                onChange={(e) => setCustomAmountNote(e.target.value)}
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -845,203 +955,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                     </div>
                   </form>
                 </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {invoiceFor && (() => {
-          const baseAmount = incomeBySubitemId[invoiceFor.subitemId] ?? 0;
-          const submitBlockReason = getSubmitBlockingReason(1);
-          const effectiveAmount = customAmountEnabled && customAmountValue !== "" && !isNaN(Number(customAmountValue))
-            ? Number(customAmountValue)
-            : baseAmount;
-          const monthLabel = invoiceFor.date ? monthKeyToLabel(invoiceFor.date.slice(0, 7)) : "";
-          return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setInvoiceFor(null)}>
-              <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200" onClick={(e) => e.stopPropagation()}>
-                <h3 className="text-lg font-semibold text-gray-900 mb-1">הגשת חשבונית</h3>
-                <div className="flex justify-between items-center mb-5 bg-gray-50 rounded-xl px-4 py-3 text-sm">
-                  <span className="text-gray-700 font-medium">{invoiceFor.location || invoiceFor.orderName}</span>
-                  <span className="text-gray-800 font-semibold">{baseAmount.toLocaleString("he-IL")} ₪</span>
-                </div>
-                {invoiceFor.attendanceStatus !== "מאושר" && (
-                  <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    הצהרה: נכחתי באירוע זה (ממתין לאישור נוכחות במערכת)
-                  </div>
-                )}
-                <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm space-y-1.5">
-                  <div className="text-emerald-700">✓ נבחר אירוע להגשה</div>
-                  <div className={invoiceFile ? "text-emerald-700" : "text-amber-700"}>
-                    {invoiceFile ? "✓" : "•"} צורף קובץ חשבונית
-                  </div>
-                  <div className={hasCompleteBankDetails ? "text-emerald-700" : "text-amber-700"}>
-                    {hasCompleteBankDetails ? "✓" : "•"} פרטי חשבון בנק מלאים
-                  </div>
-                </div>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleSubmitInvoice([invoiceFor.orderId], [invoiceFor.subitemId], baseAmount, invoiceFor.date, monthLabel);
-                  }}
-                  className="space-y-4"
-                >
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-                    <div className="text-sm font-semibold text-gray-800">פרטי בנק</div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">שם המוטב</label>
-                      <input
-                        type="text"
-                        className="input-field w-full sm:max-w-[300px]"
-                        placeholder="שם מלא"
-                        value={invoiceForm.beneficiaryName}
-                        onChange={(e) => setInvoiceForm((f) => ({ ...f, beneficiaryName: e.target.value }))}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">קוד בנק</label>
-                      <input
-                        type="text"
-                        className="input-field w-full sm:max-w-[300px]"
-                        placeholder="למשל 12"
-                        value={invoiceForm.bankCode}
-                        onChange={(e) => setInvoiceForm((f) => ({ ...f, bankCode: e.target.value }))}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">מספר סניף</label>
-                      <input
-                        type="text"
-                        className="input-field w-full sm:max-w-[300px]"
-                        placeholder="למשל 345"
-                        value={invoiceForm.bankBranch}
-                        onChange={(e) => setInvoiceForm((f) => ({ ...f, bankBranch: e.target.value }))}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">מספר חשבון</label>
-                      <input
-                        type="text"
-                        className="input-field w-full sm:max-w-[300px]"
-                        placeholder="למשל 1234567"
-                        value={invoiceForm.bankAccount}
-                        onChange={(e) => setInvoiceForm((f) => ({ ...f, bankAccount: e.target.value }))}
-                      />
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        className="text-xs text-blue-700 hover:text-blue-800 underline underline-offset-2"
-                        onClick={() =>
-                          setInvoiceForm((f) => ({
-                            ...f,
-                            beneficiaryName: artistBankDetails.beneficiaryName,
-                            bankCode: artistBankDetails.bankCode,
-                            bankBranch: artistBankDetails.bankBranch,
-                            bankAccount: artistBankDetails.bankAccount,
-                          }))
-                        }
-                      >
-                        מלא מהפרטים השמורים שלי
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                      קובץ חשבונית <span className="text-red-500">*</span>
-                    </label>
-                    <label
-                      className={`w-full sm:max-w-[300px] cursor-pointer rounded-xl border-2 px-4 py-3 transition-colors ${
-                        invoiceFile
-                          ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
-                          : "border-blue-300 bg-blue-50 hover:bg-blue-100"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className={`text-sm font-medium ${invoiceFile ? "text-emerald-800" : "text-blue-800"}`}>
-                          {invoiceFile ? "הקובץ הועלה בהצלחה" : "לחץ/י כאן להעלאת קובץ חשבונית"}
-                        </span>
-                        <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${invoiceFile ? "bg-emerald-200 text-emerald-800" : "bg-blue-200 text-blue-800"}`}>
-                          PDF / תמונה
-                        </span>
-                      </div>
-                      <div className="mt-1 text-xs text-gray-600 truncate text-right">
-                        {invoiceFile ? invoiceFile.name : "לא נבחר קובץ"}
-                      </div>
-                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)} />
-                    </label>
-                  </div>
-                  {invoiceFile && (
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">מספר חשבונית / קבלה</label>
-                      <input
-                        type="text"
-                        className="input-field w-full sm:max-w-[300px]"
-                        placeholder="לדוגמה: 12345"
-                        value={invoiceForm.invoiceNumber}
-                        onChange={(e) => setInvoiceForm((f) => ({ ...f, invoiceNumber: e.target.value }))}
-                      />
-                    </div>
-                  )}
-                  {extractingFile && (
-                    <div className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-3">
-                      <div className="flex items-center gap-2 text-blue-800 font-semibold text-sm">
-                        <span className="inline-block h-3 w-3 rounded-full bg-blue-500 animate-pulse" />
-                        מחלץ נתונים מהקובץ...
-                      </div>
-                      <p className="mt-1 text-xs text-blue-700">
-                        המערכת קוראת אוטומטית מספר חשבונית, תיאור וסכום (אם נמצא)
-                      </p>
-                    </div>
-                  )}
-                  <div className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={customAmountEnabled}
-                        onChange={(e) => setCustomAmountEnabled(e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm font-medium text-gray-700">שנה את סכום החשבונית</span>
-                    </label>
-                    {customAmountEnabled && (
-                      <div className="space-y-2 pr-6">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          className="input-field"
-                          placeholder="סכום בשקלים"
-                          value={customAmountValue}
-                          onChange={(e) => setCustomAmountValue(e.target.value)}
-                        />
-                        <input
-                          type="text"
-                          className="input-field text-sm"
-                          placeholder="סיבה לשינוי הסכום"
-                          value={customAmountNote}
-                          onChange={(e) => setCustomAmountNote(e.target.value)}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2 justify-end">
-                    <button type="button" onClick={() => setInvoiceFor(null)} className="btn-secondary" disabled={submittingInvoice}>
-                      ביטול
-                    </button>
-                    <button
-                      type="submit"
-                      className="btn-primary"
-                      disabled={submittingInvoice || Boolean(submitBlockReason)}
-                    >
-                      {submittingInvoice
-                        ? "שולח..."
-                        : submitBlockReason
-                          ? `חסר: ${submitBlockReason}`
-                          : `הגש חשבונית — ${effectiveAmount.toLocaleString("he-IL")} ₪`}
-                    </button>
-                  </div>
-                </form>
               </div>
             </div>
           );
