@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
-import { COOKIE_NAME } from "@/lib/auth";
-
+import {
+  COOKIE_NAME,
+  createSession,
+  SESSION_COOKIE_OPTIONS,
+  SessionUser,
+} from "@/lib/auth";
 const PROTECTED_ROUTES = ["/orders", "/my-registrations", "/admin"];
 const ADMIN_ROUTES = ["/admin"];
 const MONDAY_API_URL = "https://api.monday.com/v2";
@@ -94,9 +98,7 @@ export async function proxy(request: NextRequest) {
     if (effectiveStatus !== "פעיל") {
       const loginUrl = new URL("/", request.url);
       loginUrl.searchParams.set("inactive", "1");
-      const response = NextResponse.redirect(loginUrl);
-      response.cookies.delete(COOKIE_NAME);
-      return response;
+      return NextResponse.redirect(loginUrl);
     }
 
     if (isAdminRoute && payload.role !== "מנהל") {
@@ -107,7 +109,17 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/admin", request.url));
     }
 
-    return NextResponse.next();
+    const response = NextResponse.next();
+    const user: SessionUser = {
+      id: String(payload.id ?? ""),
+      name: String(payload.name ?? ""),
+      role: payload.role as SessionUser["role"],
+      status: String(payload.status ?? ""),
+      location: payload.location as string | undefined,
+    };
+    const newToken = await createSession(user);
+    response.cookies.set(COOKIE_NAME, newToken, SESSION_COOKIE_OPTIONS);
+    return response;
   } catch {
     const loginUrl = new URL("/", request.url);
     loginUrl.searchParams.set("redirect", pathname);

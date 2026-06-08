@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mondayQuery, BOARDS, ARTIST_LOCATION_COLUMN_ID, parseDropdownLabel } from "@/lib/monday";
-import { createSession, setSessionCookie, SessionUser } from "@/lib/auth";
+import { createSession, COOKIE_NAME, SESSION_COOKIE_OPTIONS, SessionUser } from "@/lib/auth";
 
 interface ArtistItem {
   id: string;
@@ -9,11 +9,17 @@ interface ArtistItem {
   column_values: { id: string; text: string; value: string | null }[];
 }
 
+function redirectInactive(request: NextRequest): NextResponse {
+  const loginUrl = new URL("/", request.url);
+  loginUrl.searchParams.set("inactive", "1");
+  return NextResponse.redirect(loginUrl);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const id = request.nextUrl.searchParams.get("id");
     if (!id || !/^\d+$/.test(id)) {
-      return NextResponse.json({ error: "מזהה לא תקין" }, { status: 400 });
+      return redirectInactive(request);
     }
 
     const query = `
@@ -35,16 +41,13 @@ export async function GET(request: NextRequest) {
     const artist = data.items?.[0];
 
     if (!artist || artist.board.id !== String(BOARDS.ARTISTS)) {
-      return NextResponse.json({ error: "משתמש לא נמצא" }, { status: 404 });
+      return redirectInactive(request);
     }
 
     const statusCol = artist.column_values.find((cv) => cv.id === "color_mm18wjry");
     const status = (statusCol?.text || "").trim();
     if (status !== "פעיל") {
-      return NextResponse.json(
-        { error: "החשבון אינו פעיל כרגע." },
-        { status: 403 }
-      );
+      return redirectInactive(request);
     }
 
     const roleCol = artist.column_values.find((cv) => cv.id === "color_mm18btbr");
@@ -58,11 +61,13 @@ export async function GET(request: NextRequest) {
 
     const user: SessionUser = { id: artist.id, name: artist.name, role, status, location };
     const token = await createSession(user);
-    await setSessionCookie(token);
 
-    return NextResponse.json({ success: true, user });
+    const destination = role === "מנהל" ? "/admin" : "/orders";
+    const response = NextResponse.redirect(new URL(destination, request.url));
+    response.cookies.set(COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
+    return response;
   } catch (error) {
     console.error("Magic link error:", error);
-    return NextResponse.json({ error: "שגיאה פנימית בשרת" }, { status: 500 });
+    return redirectInactive(request);
   }
 }

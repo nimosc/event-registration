@@ -3,6 +3,15 @@ import { cookies } from "next/headers";
 
 const COOKIE_NAME = "session";
 const JWT_SECRET = process.env.JWT_SECRET;
+const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 360;
+
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  maxAge: SESSION_COOKIE_MAX_AGE,
+  path: "/",
+};
 
 export interface SessionUser {
   id: string;
@@ -25,7 +34,7 @@ export async function createSession(user: SessionUser): Promise<string> {
   const token = await new SignJWT({ ...user })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("7d")
+    .setExpirationTime("360d")
     .sign(secret);
 
   return token;
@@ -56,13 +65,7 @@ export async function getSession(): Promise<SessionUser | null> {
 
 export async function setSessionCookie(token: string): Promise<void> {
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-    path: "/",
-  });
+  cookieStore.set(COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
 }
 
 export async function clearSessionCookie(): Promise<void> {

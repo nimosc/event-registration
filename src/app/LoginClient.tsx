@@ -2,15 +2,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
-
 interface LoginClientProps {
   magicId?: string;
   inactive?: boolean;
 }
 
 export default function LoginClient({ magicId, inactive }: LoginClientProps) {
-  const router = useRouter();
   const magicLinkFired = useRef(false);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
@@ -49,22 +46,8 @@ export default function LoginClient({ magicId, inactive }: LoginClientProps) {
     if (magicLinkFired.current) return;
     magicLinkFired.current = true;
     setLoading(true);
-    fetch(`/api/magic-link?id=${encodeURIComponent(magicId)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) {
-          const role = data.user?.role;
-          router.push(role === "מנהל" ? "/admin" : "/orders");
-        } else {
-          setError(data.error || "לינק לא תקין");
-          setLoading(false);
-        }
-      })
-      .catch(() => {
-        setError("שגיאת רשת. בדוק את החיבור לאינטרנט.");
-        setLoading(false);
-      });
-  }, [magicId, router]);
+    window.location.href = `/api/magic-link?id=${encodeURIComponent(magicId)}`;
+  }, [magicId]);
 
   useEffect(() => {
     if (mode !== "register") return;
