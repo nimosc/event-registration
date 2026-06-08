@@ -96,7 +96,6 @@ function CollapsibleSection({
 function StatBadge({
   count,
   label,
-  dotColor,
   bgClass,
   borderClass,
   countClass,
@@ -104,7 +103,6 @@ function StatBadge({
 }: {
   count: number;
   label: string;
-  dotColor: string;
   bgClass: string;
   borderClass: string;
   countClass: string;
@@ -112,13 +110,12 @@ function StatBadge({
 }) {
   return (
     <div
-      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm border ${bgClass} ${borderClass} ${
-        count === 0 ? "opacity-60" : ""
+      className={`flex flex-col items-center justify-center rounded-lg px-1 py-1.5 border min-w-0 ${bgClass} ${borderClass} ${
+        count === 0 ? "opacity-55" : ""
       }`}
     >
-      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
-      <span className={`font-medium ${countClass}`}>{count}</span>
-      <span className={labelClass}>{label}</span>
+      <span className={`text-sm font-bold leading-none ${countClass}`}>{count}</span>
+      <span className={`text-[10px] leading-tight mt-0.5 text-center ${labelClass}`}>{label}</span>
     </div>
   );
 }
@@ -445,22 +442,20 @@ export default function OrdersClient({ user }: OrdersClientProps) {
             </button>
           </div>
 
-          {/* Stats row — always show all categories for the active filter */}
+          {/* Stats row — single compact row for the active filter */}
           {!loading && (
-            <div className="flex gap-2 mt-5 flex-wrap">
+            <div className="grid grid-cols-6 gap-1.5 mt-5">
               <StatBadge
                 count={filteredOrders.length}
-                label="הזמנות"
-                dotColor="bg-gray-400"
+                label='סה"כ'
                 bgClass="bg-white"
                 borderClass="border-gray-200"
-                countClass="text-gray-700"
+                countClass="text-gray-800"
                 labelClass="text-gray-500"
               />
               <StatBadge
                 count={myApprovedOrders.length}
-                label="מועמדויות שאושרו"
-                dotColor="bg-green-500"
+                label="אושרו"
                 bgClass="bg-green-50"
                 borderClass="border-green-200"
                 countClass="text-green-700"
@@ -468,8 +463,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               />
               <StatBadge
                 count={myOrders.length}
-                label="המועמדויות שלי"
-                dotColor="bg-blue-500"
+                label="בהמתנה"
                 bgClass="bg-blue-50"
                 borderClass="border-blue-200"
                 countClass="text-blue-700"
@@ -477,8 +471,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               />
               <StatBadge
                 count={openOrders.length}
-                label="פתוחות למועמדות"
-                dotColor="bg-emerald-500"
+                label="פתוחות"
                 bgClass="bg-emerald-50"
                 borderClass="border-emerald-200"
                 countClass="text-emerald-700"
@@ -486,30 +479,19 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               />
               <StatBadge
                 count={closedOrders.length}
-                label="נסגרה קבלת מועמדויות"
-                dotColor="bg-gray-400"
+                label="נסגרו"
                 bgClass="bg-gray-50"
                 borderClass="border-gray-200"
-                countClass="text-gray-600"
+                countClass="text-gray-700"
                 labelClass="text-gray-500"
               />
               <StatBadge
                 count={assignmentDoneOrders.length}
-                label="הסתיים השיבוץ"
-                dotColor="bg-slate-500"
+                label="הושלם"
                 bgClass="bg-slate-100"
                 borderClass="border-slate-200"
                 countClass="text-slate-700"
                 labelClass="text-slate-600"
-              />
-              <StatBadge
-                count={cancelledOrders.length}
-                label="בוטלו"
-                dotColor="bg-red-400"
-                bgClass="bg-red-50"
-                borderClass="border-red-200"
-                countClass="text-red-700"
-                labelClass="text-red-600"
               />
             </div>
           )}
@@ -618,7 +600,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               </div>
             </CollapsibleSection>
 
-            <CollapsibleSection accentColor="bg-blue-500" label="המועמדויות שלי" count={myOrders.length} countBg="bg-blue-100" countColor="text-blue-600">
+            <CollapsibleSection accentColor="bg-blue-500" label="מועמדויות בהמתנה" count={myOrders.length} countBg="bg-blue-100" countColor="text-blue-600">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {myOrders.map(order => (
                   <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
@@ -626,7 +608,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               </div>
             </CollapsibleSection>
 
-            <CollapsibleSection accentColor="bg-green-500" label="פתוחות למועמדות" count={openOrders.length} countBg="bg-green-100" countColor="text-green-600" defaultOpen>
+            <CollapsibleSection accentColor="bg-emerald-500" label="פתוחות להגשה" count={openOrders.length} countBg="bg-emerald-100" countColor="text-emerald-700" defaultOpen>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {openOrders.map(order => (
                   <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
@@ -634,7 +616,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               </div>
             </CollapsibleSection>
 
-            <CollapsibleSection accentColor="bg-gray-300" label="נסגרה קבלת מועמדויות" count={closedOrders.length} labelColor="text-gray-400">
+            <CollapsibleSection accentColor="bg-gray-300" label="נסגרו להגשה" count={closedOrders.length} labelColor="text-gray-400">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-50">
                 {closedOrders.map(order => (
                   <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
@@ -642,7 +624,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
               </div>
             </CollapsibleSection>
 
-            <CollapsibleSection accentColor="bg-slate-400" label="הסתיים השיבוץ" count={assignmentDoneOrders.length} labelColor="text-slate-500" countBg="bg-slate-100" countColor="text-slate-600">
+            <CollapsibleSection accentColor="bg-slate-400" label="השיבוץ הושלם" count={assignmentDoneOrders.length} labelColor="text-slate-500" countBg="bg-slate-100" countColor="text-slate-600">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
                 {assignmentDoneOrders.map(order => (
                   <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
