@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import NavBar from "@/components/NavBar";
 import RegistrantsList, { Registrant } from "@/components/RegistrantsList";
@@ -681,6 +682,45 @@ function LoadingSkeleton() {
 
 type FilterMode = "relevant" | "needs_confirmation" | "all";
 type TimeFilterMode = "future" | "past" | "all";
+type StatusMode = "candidacy" | "arrival";
+
+function SegmentedControl<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: string; badge?: number }[];
+}) {
+  return (
+    <div className="inline-flex p-1 bg-gray-100 rounded-xl gap-0.5">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+            value === option.value
+              ? "bg-white text-gray-900 shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          {option.label}
+          {option.badge != null && option.badge > 0 && (
+            <span
+              className={`mr-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                value === option.value ? "bg-gray-100 text-gray-700" : "bg-gray-200/80 text-gray-600"
+              }`}
+            >
+              {option.badge}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function parseDateOnly(dateStr: string): Date | null {
   if (!dateStr) return null;
@@ -796,7 +836,8 @@ export default function AdminClient({ user }: AdminClientProps) {
   const [filterMode, setFilterMode] = useState<FilterMode>("relevant");
   const [timeFilterMode, setTimeFilterMode] = useState<TimeFilterMode>("future");
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusMode, setStatusMode] = useState<"candidacy" | "arrival">("candidacy");
+  const searchParams = useSearchParams();
+  const statusMode: StatusMode = searchParams.get("mode") === "arrival" ? "arrival" : "candidacy";
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -912,25 +953,31 @@ export default function AdminClient({ user }: AdminClientProps) {
     });
 
   const pendingCount = orders.filter((o) => !o.status.includes("בוטל") && hasPendingConfirmation(o, statusMode)).length;
-  const upcomingCount = orders.filter((o) => !o.status.includes("בוטל") && isUpcoming(o.date)).length;
   const relevantCount = orders.filter(
     (o) => !o.status.includes("בוטל") && (hasPendingConfirmation(o, statusMode) || isUpcoming(o.date))
   ).length;
-  const totalRegistrants = orders.reduce((sum, o) => sum + o.subitems.length, 0);
+  const pageTitle = statusMode === "arrival" ? "אישור הגעה" : "אישור מועמדות";
+  const pageSubtitle =
+    statusMode === "arrival"
+      ? "אישור נוכחות למועמדויות שאושרו"
+      : "סקירה ואישור מועמדויות חדשות";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <NavBar userName={user.name} userRole={user.role} />
+      <NavBar userName={user.name} userRole={user.role} adminMode={statusMode} />
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">ניהול הזמנות</h1>
-              <p className="text-sm text-gray-500 mt-1">
-                ניהול כל ההזמנות ואישור מועמדים
-              </p>
+              <h1 className="text-2xl font-bold text-gray-900">{pageTitle}</h1>
+              <p className="text-sm text-gray-500 mt-1">{pageSubtitle}</p>
+              {!loading && pendingCount > 0 && (
+                <p className="text-xs text-orange-600 mt-2 font-medium">
+                  {pendingCount} הזמנות ממתינות לטיפול
+                </p>
+              )}
             </div>
             <button
               onClick={fetchOrders}
@@ -954,145 +1001,31 @@ export default function AdminClient({ user }: AdminClientProps) {
             </button>
           </div>
 
-          {/* Stats */}
-          {!loading && (
-            <div className="flex gap-3 mt-5 flex-wrap">
-              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm">
-                <span className="w-2 h-2 rounded-full bg-blue-400" />
-                <span className="text-gray-700 font-medium">{orders.length}</span>
-                <span className="text-gray-500">הזמנות</span>
-              </div>
-              {pendingCount > 0 && (
-                <div className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-xl px-4 py-2 text-sm">
-                  <span className="w-2 h-2 rounded-full bg-orange-500" />
-                  <span className="text-orange-700 font-medium">{pendingCount}</span>
-                  <span className="text-orange-600">ממתינות לאישור</span>
-                </div>
-              )}
-              {upcomingCount > 0 && (
-                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-sm">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
-                  <span className="text-blue-700 font-medium">{upcomingCount}</span>
-                  <span className="text-blue-600">בימים הקרובים</span>
-                </div>
-              )}
-              <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-xl px-4 py-2 text-sm">
-                <span className="w-2 h-2 rounded-full bg-purple-400" />
-                <span className="text-purple-700 font-medium">{totalRegistrants}</span>
-                <span className="text-purple-600">מועמדים</span>
-              </div>
-            </div>
-          )}
         </div>
-
-        {/* Confirm Tabs */}
-        {!loading && orders.length > 0 && (
-          <div className="mb-5 flex gap-2 flex-wrap">
-            <button
-              onClick={() => setStatusMode("candidacy")}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                statusMode === "candidacy"
-                  ? "bg-gray-900 text-white border-gray-900 shadow-sm"
-                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-              }`}
-            >
-              אישור מועמדות
-            </button>
-            <button
-              onClick={() => setStatusMode("arrival")}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                statusMode === "arrival"
-                  ? "bg-gray-900 text-white border-gray-900 shadow-sm"
-                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-              }`}
-            >
-              אישור הגעה
-            </button>
-          </div>
-        )}
 
         {/* Filters */}
         {!loading && orders.length > 0 && (
-          <div className="flex flex-col gap-3 mb-5">
-            {/* Time filter */}
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={() => setTimeFilterMode("future")}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                  timeFilterMode === "future"
-                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                עתידי
-              </button>
-              <button
-                onClick={() => setTimeFilterMode("past")}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                  timeFilterMode === "past"
-                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                עבר
-              </button>
-              <button
-                onClick={() => setTimeFilterMode("all")}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                  timeFilterMode === "all"
-                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                הכל
-              </button>
+          <div className="mb-5 bg-white border border-gray-200 rounded-2xl p-4 space-y-3 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
+              <SegmentedControl
+                value={timeFilterMode}
+                onChange={setTimeFilterMode}
+                options={[
+                  { value: "future", label: "עתידי" },
+                  { value: "past", label: "עבר" },
+                  { value: "all", label: "הכל" },
+                ]}
+              />
+              <SegmentedControl
+                value={filterMode}
+                onChange={setFilterMode}
+                options={[
+                  { value: "relevant", label: "רלוונטי", badge: relevantCount },
+                  { value: "needs_confirmation", label: "ממתין", badge: pendingCount },
+                  { value: "all", label: "הכל" },
+                ]}
+              />
             </div>
-
-            {/* Filter tabs */}
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={() => setFilterMode("relevant")}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                  filterMode === "relevant"
-                    ? "bg-gray-900 text-white border-gray-900 shadow-sm"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                רלוונטי עכשיו
-                {relevantCount > 0 && (
-                  <span className={`mr-2 text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                    filterMode === "relevant" ? "bg-white/20 text-white" : "bg-orange-100 text-orange-600"
-                  }`}>{relevantCount}</span>
-                )}
-              </button>
-              <button
-                onClick={() => setFilterMode("needs_confirmation")}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                  filterMode === "needs_confirmation"
-                    ? "bg-orange-500 text-white border-orange-500 shadow-sm"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                ממתינות לאישור
-                {pendingCount > 0 && (
-                  <span className={`mr-2 text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                    filterMode === "needs_confirmation" ? "bg-white/20 text-white" : "bg-orange-100 text-orange-600"
-                  }`}>{pendingCount}</span>
-                )}
-              </button>
-              <button
-                onClick={() => setFilterMode("all")}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                  filterMode === "all"
-                    ? "bg-gray-900 text-white border-gray-900 shadow-sm"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                כל ההזמנות
-              </button>
-            </div>
-
-            {/* Search */}
             <div className="relative">
               <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                 <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1104,7 +1037,7 @@ export default function AdminClient({ user }: AdminClientProps) {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="חיפוש לפי שם או מיקום..."
-                className="w-full border border-gray-200 rounded-xl pr-10 pl-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                className="w-full border border-gray-100 rounded-xl pr-10 pl-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50"
               />
             </div>
           </div>

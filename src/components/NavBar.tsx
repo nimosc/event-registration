@@ -9,9 +9,10 @@ interface NavBarProps {
   userName: string;
   userRole: "אומן" | "מנהל" | "ODT";
   userLocation?: string;
+  adminMode?: "candidacy" | "arrival";
 }
 
-export default function NavBar({ userName, userRole, userLocation }: NavBarProps) {
+export default function NavBar({ userName, userRole, userLocation, adminMode = "candidacy" }: NavBarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -81,7 +82,8 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
   const navLinks =
     userRole === "מנהל"
       ? [
-          { href: "/admin", label: "ניהול הזמנות" },
+          { href: "/admin", label: "אישור מועמדות", adminMode: "candidacy" as const },
+          { href: "/admin?mode=arrival", label: "אישור הגעה", adminMode: "arrival" as const },
         ]
       : [
           { href: "/orders", label: "הזמנות פתוחות" },
@@ -110,19 +112,25 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
 
           {/* Desktop Nav Links */}
           <div className="hidden md:flex items-center gap-1">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${
-                  pathname === link.href
-                    ? "bg-blue-50 text-blue-600"
-                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                }`}
-              >
-                {link.label}
-              </Link>
-            ))}
+            {navLinks.map((link) => {
+              const isAdminLink = "adminMode" in link;
+              const isActive = isAdminLink
+                ? pathname === "/admin" && adminMode === link.adminMode
+                : pathname === link.href;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${
+                    isActive
+                      ? "bg-blue-50 text-blue-600"
+                      : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
           </div>
 
           {/* User Info & Logout */}
@@ -260,20 +268,26 @@ export default function NavBar({ userName, userRole, userLocation }: NavBarProps
               )}
             </div>
 
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                onClick={() => setMenuOpen(false)}
-                className={`block px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${
-                  pathname === link.href
-                    ? "bg-blue-50 text-blue-600"
-                    : "text-gray-600 hover:bg-gray-100"
-                }`}
-              >
-                {link.label}
-              </Link>
-            ))}
+            {navLinks.map((link) => {
+              const isAdminLink = "adminMode" in link;
+              const isActive = isAdminLink
+                ? pathname === "/admin" && adminMode === link.adminMode
+                : pathname === link.href;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setMenuOpen(false)}
+                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${
+                    isActive
+                      ? "bg-blue-50 text-blue-600"
+                      : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
 
             <button
               onClick={() => {

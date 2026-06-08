@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import AdminClient from "./AdminClient";
@@ -14,5 +15,9 @@ export default async function AdminPage() {
     redirect("/orders");
   }
 
-  return <AdminClient user={session} />;
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <AdminClient user={session} />
+    </Suspense>
+  );
 }
