@@ -538,7 +538,21 @@ export function isRegistrationOpenForRole(
   role: RegistrationRole,
   capacity: OrderCapacityState
 ): boolean {
-  return role === "ODT" ? !capacity.odt.isClosed : !capacity.artist.isClosed;
+  const state = role === "ODT" ? capacity.odt : capacity.artist;
+  if (state.capacityLimit <= 0) return false;
+  return !state.isClosed;
+}
+
+export function areAllRelevantRolesAtCapacity(
+  capacity: OrderCapacityState
+): boolean {
+  const artistRelevant = capacity.artist.capacityLimit > 0;
+  const odtRelevant = capacity.odt.capacityLimit > 0;
+  if (!artistRelevant && !odtRelevant) return false;
+  return (
+    (!artistRelevant || capacity.artist.isClosed) &&
+    (!odtRelevant || capacity.odt.isClosed)
+  );
 }
 
 export function getCandidacyOrderStatusFromCapacity(
@@ -546,10 +560,8 @@ export function getCandidacyOrderStatusFromCapacity(
   currentStatus: string
 ): string {
   if (currentStatus === STATUS_CANCELLED) return STATUS_CANCELLED;
-  if (currentStatus === STATUS_ASSIGNMENT_DONE && !capacity.artist.isClosed) {
-    return STATUS_OPEN;
-  }
-  return capacity.artist.isClosed ? STATUS_CANDIDACY_CLOSED : STATUS_OPEN;
+  if (areAllRelevantRolesAtCapacity(capacity)) return STATUS_ASSIGNMENT_DONE;
+  return STATUS_OPEN;
 }
 
 export async function getAllArtists(extraColumnIds: string[] = []) {

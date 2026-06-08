@@ -8,17 +8,11 @@ import {
   parseLinkedItemIds,
   updateAssignedCount,
   updateOrderStatus,
-  getOrderById,
   getOrderAdminSnapshotById,
   getArtistByIdBasic,
   updateCandidacyConfirmation,
-  mapInternalCandidacyToMonday,
-  ARTIST_ACTIVE_STATUS_COLUMN_ID,
-  STATUS_OPEN,
   STATUS_ASSIGNMENT_DONE,
   STATUS_CANCELLED,
-  CANDIDACY_STATUS_COLUMN_ID,
-  BOARDS,
   getOrderCapacityState,
   getCandidacyOrderStatusFromCapacity,
 } from "@/lib/monday";
@@ -58,6 +52,9 @@ export async function POST(request: NextRequest) {
     if (orderStatus === STATUS_CANCELLED) {
       return NextResponse.json({ error: "לא ניתן לשבץ להזמנה שבוטלה" }, { status: 400 });
     }
+    if (orderStatus === STATUS_ASSIGNMENT_DONE) {
+      return NextResponse.json({ error: "לא ניתן לשבץ להזמנה שבה הסתיים השיבוץ" }, { status: 400 });
+    }
 
     const requiredCol = getColumnValue(order, "numeric_mm185aw7");
     const assignedCol = getColumnValue(order, "numeric_mm18d914");
@@ -89,34 +86,12 @@ export async function POST(request: NextRequest) {
       capacityAfterAssign,
       orderStatus
     );
-    if (
-      desiredCandidacyStatus !== orderStatus &&
-      desiredCandidacyStatus !== STATUS_ASSIGNMENT_DONE
-    ) {
+    if (desiredCandidacyStatus !== orderStatus) {
       await updateOrderStatus(orderId, desiredCandidacyStatus);
     }
 
     // Mark candidacy as approved since this is an admin assignment.
     await updateCandidacyConfirmation(subitem.id, "מאושר");
-
-    // If we reached the required amount, close assignment.
-    const updatedOrder = await getOrderById(orderId);
-    if (updatedOrder) {
-      const requiredCol2 = getColumnValue(updatedOrder, "numeric_mm185aw7");
-      const requiredOdtCol2 = getColumnValue(updatedOrder, "numeric_mm387qc7");
-      const requiredCount2 = parseFloat(requiredCol2?.text || "0") || 0;
-      const requiredOdtCount2 = parseFloat(requiredOdtCol2?.text || "0") || 0;
-      const totalRequired2 = requiredCount2 + requiredOdtCount2;
-      const mondayApproved = mapInternalCandidacyToMonday("מאושר");
-      const confirmedCount = (updatedOrder.subitems || []).filter((sub) => {
-        const candidacyCol = sub.column_values.find((cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID);
-        return candidacyCol?.text === mondayApproved;
-      }).length;
-
-      if (totalRequired2 > 0 && confirmedCount >= totalRequired2) {
-        await updateOrderStatus(orderId, STATUS_ASSIGNMENT_DONE);
-      }
-    }
 
     const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
     if (webhookUrl) {

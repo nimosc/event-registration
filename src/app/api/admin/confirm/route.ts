@@ -10,7 +10,6 @@ import {
   updateOrderStatus,
   getOrderCapacityState,
   getCandidacyOrderStatusFromCapacity,
-  STATUS_ASSIGNMENT_DONE,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
@@ -65,36 +64,29 @@ export async function PATCH(request: NextRequest) {
 
       const orderDto = await getOrderAdminSnapshotById(orderId);
       if (orderDto) {
-        const { requiredCount, requiredOdtCount, status: currentStatus, subitems } = orderDto;
-        const totalRequired = requiredCount + (requiredOdtCount ?? 0);
-        const confirmedCount = subitems.filter((s) => s.candidacyStatus === "מאושר").length;
+        const { status: currentStatus } = orderDto;
         let nextStatus = currentStatus;
 
-        if (action === "confirm" && totalRequired > 0 && confirmedCount >= totalRequired) {
-          await updateOrderStatus(orderId, STATUS_ASSIGNMENT_DONE);
-          nextStatus = STATUS_ASSIGNMENT_DONE;
-        } else {
-          const liveOrder = await getOrderById(orderId);
-          if (liveOrder) {
-            const requiredCol = getColumnValue(liveOrder, "numeric_mm185aw7");
-            const requiredOdtCol = getColumnValue(liveOrder, "numeric_mm387qc7");
-            const artistAssignedCol = getColumnValue(liveOrder, "numeric_mm18d914");
-            const odtAssignedCol = getColumnValue(liveOrder, "numeric_mm3b6rnr");
-            const requiredArtist = parseFloat(requiredCol?.text || "0") || 0;
-            const requiredOdt = parseFloat(requiredOdtCol?.text || "0") || 0;
-            const assignedArtist = parseFloat(artistAssignedCol?.text || "0") || 0;
-            const assignedOdt = parseFloat(odtAssignedCol?.text || "0") || 0;
-            const capacity = getOrderCapacityState(
-              requiredArtist,
-              assignedArtist,
-              requiredOdt,
-              assignedOdt
-            );
-            const desiredStatus = getCandidacyOrderStatusFromCapacity(capacity, currentStatus);
-            if (desiredStatus !== currentStatus) {
-              await updateOrderStatus(orderId, desiredStatus);
-              nextStatus = desiredStatus;
-            }
+        const liveOrder = await getOrderById(orderId);
+        if (liveOrder) {
+          const requiredCol = getColumnValue(liveOrder, "numeric_mm185aw7");
+          const requiredOdtCol = getColumnValue(liveOrder, "numeric_mm387qc7");
+          const artistAssignedCol = getColumnValue(liveOrder, "numeric_mm18d914");
+          const odtAssignedCol = getColumnValue(liveOrder, "numeric_mm3b6rnr");
+          const requiredArtist = parseFloat(requiredCol?.text || "0") || 0;
+          const requiredOdt = parseFloat(requiredOdtCol?.text || "0") || 0;
+          const assignedArtist = parseFloat(artistAssignedCol?.text || "0") || 0;
+          const assignedOdt = parseFloat(odtAssignedCol?.text || "0") || 0;
+          const capacity = getOrderCapacityState(
+            requiredArtist,
+            assignedArtist,
+            requiredOdt,
+            assignedOdt
+          );
+          const desiredStatus = getCandidacyOrderStatusFromCapacity(capacity, currentStatus);
+          if (desiredStatus !== currentStatus) {
+            await updateOrderStatus(orderId, desiredStatus);
+            nextStatus = desiredStatus;
           }
         }
 

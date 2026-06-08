@@ -16,6 +16,7 @@ import {
   getLiveArtistRole,
   getOrderCapacityState,
   isRegistrationOpenForRole,
+  getCandidacyOrderStatusFromCapacity,
 } from "@/lib/monday";
 import { getSession, createSession, setSessionCookie } from "@/lib/auth";
 
@@ -120,6 +121,8 @@ export async function GET() {
 
         const orderLocation =
           orderLocationCol?.text?.trim() || parseDropdownLabel(orderLocationCol?.value)?.trim() || "";
+        const effectiveStatus = getCandidacyOrderStatusFromCapacity(capacity, status);
+        const registrationRole = session.role === "ODT" ? "ODT" : "אומן";
 
         return {
           id: item.id,
@@ -128,15 +131,14 @@ export async function GET() {
           location: locationCol?.text || "",
           activityHours: (activityHoursCol?.text || "").trim(),
           orderLocation,
-          status,
+          status: effectiveStatus,
           requiredCount,
           assignedCount,
           odtRequired,
           odtAssigned,
-          isRoleOpen: isRegistrationOpenForRole(
-            session.role === "ODT" ? "ODT" : "אומן",
-            capacity
-          ),
+          isRoleOpen:
+            effectiveStatus !== STATUS_ASSIGNMENT_DONE &&
+            isRegistrationOpenForRole(registrationRole, capacity),
           spotsRemaining: session.role === "ODT"
             ? (odtCapacity > 0 ? Math.max(0, odtCapacity - odtAssigned) : 999)
             : (artistCapacity > 0 ? Math.max(0, artistCapacity - assignedCount) : 999),

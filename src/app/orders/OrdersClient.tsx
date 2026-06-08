@@ -252,11 +252,23 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "שגיאה בהגשת המועמדות");
-    setOrders(prev => prev.map(o =>
-      o.id === orderId
-        ? { ...o, isRegistered: true, subitemId: data.subitemId, assignedCount: o.assignedCount + 1, spotsRemaining: Math.max(0, o.spotsRemaining - 1) }
-        : o
-    ));
+    setOrders(prev => prev.map(o => {
+      if (o.id !== orderId) return o;
+      const isOdt = user.role === "ODT";
+      const baseRequired = isOdt ? o.odtRequired : o.requiredCount;
+      const capacityCeiling = baseRequired > 0 ? Math.ceil(baseRequired * 1.5) : 0;
+      const newApplied = (isOdt ? o.odtAssigned : o.assignedCount) + 1;
+      const newSpotsRemaining = Math.max(0, o.spotsRemaining - 1);
+      return {
+        ...o,
+        isRegistered: true,
+        subitemId: data.subitemId,
+        assignedCount: isOdt ? o.assignedCount : o.assignedCount + 1,
+        odtAssigned: isOdt ? o.odtAssigned + 1 : o.odtAssigned,
+        spotsRemaining: newSpotsRemaining,
+        isRoleOpen: capacityCeiling > 0 && newApplied < capacityCeiling,
+      };
+    }));
   }
 
   async function handleUnregister(orderId: string, subitemId: string) {
@@ -278,25 +290,19 @@ export default function OrdersClient({ user }: OrdersClientProps) {
   const assignmentDoneOrders = filteredOrders.filter(
     (o) => !o.isRegistered && o.status === "הסתיים השיבוץ" && !isPastOrder(o.date)
   );
-  const candidacyClosedOrders = filteredOrders.filter(
-    (o) => !o.isRegistered && o.status === "סגירת קבלת מועמדויות" && !isPastOrder(o.date)
-  );
   const openOrders = filteredOrders.filter(
     (o) =>
       !o.isRegistered &&
       o.status !== "הסתיים השיבוץ" &&
-      o.status !== "סגירת קבלת מועמדויות" &&
       o.status !== "בוטל" &&
-      (o.requiredCount + o.odtRequired === 0 || o.spotsRemaining > 0)
+      o.isRoleOpen
   );
   const closedOrders = filteredOrders.filter(
     (o) =>
       !o.isRegistered &&
       o.status !== "הסתיים השיבוץ" &&
-      o.status !== "סגירת קבלת מועמדויות" &&
       o.status !== "בוטל" &&
-      o.requiredCount + o.odtRequired > 0 &&
-      o.spotsRemaining <= 0
+      !o.isRoleOpen
   );
 
   const greeting = () => {
@@ -544,14 +550,6 @@ export default function OrdersClient({ user }: OrdersClientProps) {
             <CollapsibleSection accentColor="bg-green-500" label="פתוחות למועמדות" count={openOrders.length} countBg="bg-green-100" countColor="text-green-600" defaultOpen>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {openOrders.map(order => (
-                  <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
-                ))}
-              </div>
-            </CollapsibleSection>
-
-            <CollapsibleSection accentColor="bg-orange-300" label="הגשת המועמדויות הסתיימה" count={candidacyClosedOrders.length} labelColor="text-orange-500" countBg="bg-orange-100" countColor="text-orange-500">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
-                {candidacyClosedOrders.map(order => (
                   <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
                 ))}
               </div>
