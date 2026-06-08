@@ -952,9 +952,17 @@ export default function AdminClient({ user }: AdminClientProps) {
       return a.name.localeCompare(b.name, "he");
     });
 
-  const pendingCount = orders.filter((o) => !o.status.includes("בוטל") && hasPendingConfirmation(o, statusMode)).length;
+  const pendingCount = orders.filter(
+    (o) =>
+      !o.status.includes("בוטל") &&
+      matchesTimeFilter(o.date, timeFilterMode) &&
+      hasPendingConfirmation(o, statusMode)
+  ).length;
   const relevantCount = orders.filter(
-    (o) => !o.status.includes("בוטל") && (hasPendingConfirmation(o, statusMode) || isUpcoming(o.date))
+    (o) =>
+      !o.status.includes("בוטל") &&
+      matchesTimeFilter(o.date, timeFilterMode) &&
+      (hasPendingConfirmation(o, statusMode) || isUpcoming(o.date))
   ).length;
   const pageTitle = statusMode === "arrival" ? "אישור הגעה" : "אישור מועמדות";
   const pageSubtitle =
