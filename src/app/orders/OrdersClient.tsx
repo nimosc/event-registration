@@ -255,9 +255,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     setOrders(prev => prev.map(o => {
       if (o.id !== orderId) return o;
       const isOdt = user.role === "ODT";
-      const baseRequired = isOdt ? o.odtRequired : o.requiredCount;
-      const capacityCeiling = baseRequired > 0 ? Math.ceil(baseRequired * 1.5) : 0;
-      const newApplied = (isOdt ? o.odtAssigned : o.assignedCount) + 1;
+      const newRoleApplied = o.roleApplied + 1;
       const newSpotsRemaining = Math.max(0, o.spotsRemaining - 1);
       return {
         ...o,
@@ -265,8 +263,9 @@ export default function OrdersClient({ user }: OrdersClientProps) {
         subitemId: data.subitemId,
         assignedCount: isOdt ? o.assignedCount : o.assignedCount + 1,
         odtAssigned: isOdt ? o.odtAssigned + 1 : o.odtAssigned,
+        roleApplied: newRoleApplied,
         spotsRemaining: newSpotsRemaining,
-        isRoleOpen: capacityCeiling > 0 && newApplied < capacityCeiling,
+        isRoleOpen: o.roleCapacityCeiling > 0 && newRoleApplied < o.roleCapacityCeiling,
       };
     }));
   }

@@ -33,6 +33,13 @@ export interface OrderData {
   assignedCount: number;
   odtRequired: number;
   odtAssigned: number;
+  /** מכסת התפקיד של המשתמש המחובר (תקרה 150%) */
+  roleCapacityCeiling: number;
+  /** כמה נרשמו לתפקיד של המשתמש המחובר */
+  roleApplied: number;
+  roleLabel: "ODT" | "אומנים";
+  artistCapacityCeiling: number;
+  odtCapacityCeiling: number;
   spotsRemaining: number;
   isRoleOpen: boolean;
   isRegistered: boolean;
@@ -123,6 +130,10 @@ export async function GET() {
           orderLocationCol?.text?.trim() || parseDropdownLabel(orderLocationCol?.value)?.trim() || "";
         const effectiveStatus = getCandidacyOrderStatusFromCapacity(capacity, status);
         const registrationRole = session.role === "ODT" ? "ODT" : "אומן";
+        const isOdt = session.role === "ODT";
+        const roleState = isOdt ? capacity.odt : capacity.artist;
+        const roleCapacityCeiling = roleState.capacityLimit;
+        const roleApplied = roleState.assigned;
 
         return {
           id: item.id,
@@ -136,12 +147,18 @@ export async function GET() {
           assignedCount,
           odtRequired,
           odtAssigned,
+          roleCapacityCeiling,
+          roleApplied,
+          roleLabel: (isOdt ? "ODT" : "אומנים") as "ODT" | "אומנים",
+          artistCapacityCeiling: artistCapacity,
+          odtCapacityCeiling: odtCapacity,
           isRoleOpen:
             effectiveStatus !== STATUS_ASSIGNMENT_DONE &&
             isRegistrationOpenForRole(registrationRole, capacity),
-          spotsRemaining: session.role === "ODT"
-            ? (odtCapacity > 0 ? Math.max(0, odtCapacity - odtAssigned) : 999)
-            : (artistCapacity > 0 ? Math.max(0, artistCapacity - assignedCount) : 999),
+          spotsRemaining:
+            roleCapacityCeiling > 0
+              ? Math.max(0, roleCapacityCeiling - roleApplied)
+              : 999,
           isRegistered: !!mySubitem,
           subitemId: mySubitem?.id,
           subitems,

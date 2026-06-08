@@ -14,6 +14,11 @@ export interface Order {
   odtRequired: number;
   assignedCount: number;
   odtAssigned: number;
+  roleCapacityCeiling: number;
+  roleApplied: number;
+  roleLabel: "ODT" | "אומנים";
+  artistCapacityCeiling: number;
+  odtCapacityCeiling: number;
   spotsRemaining: number;
   isRoleOpen: boolean;
   isRegistered: boolean;
@@ -42,37 +47,100 @@ function formatDateDDMMYYYY(dateStr: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function SpotsBar({
-  applied, capacityCeiling, spotsRemaining, forceDone,
+function RoleCapacityBadge({
+  label, applied, ceiling, accent,
 }: {
+  label: string;
+  applied: number;
+  ceiling: number;
+  accent: "violet" | "blue";
+}) {
+  if (ceiling <= 0) return null;
+  const isFull = applied >= ceiling;
+  const styles =
+    accent === "violet"
+      ? isFull
+        ? "bg-violet-200 text-violet-800"
+        : "bg-violet-100 text-violet-700"
+      : isFull
+        ? "bg-blue-200 text-blue-800"
+        : "bg-blue-100 text-blue-700";
+
+  return (
+    <span className={`inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full ${styles}`}>
+      {label}: {applied}/{ceiling}
+    </span>
+  );
+}
+
+function SpotsBar({
+  roleLabel, applied, capacityCeiling, spotsRemaining, forceDone,
+  artistApplied, artistCapacityCeiling, odtApplied, odtCapacityCeiling,
+}: {
+  roleLabel: "ODT" | "אומנים";
   applied: number;
   capacityCeiling: number;
   spotsRemaining: number;
   forceDone?: boolean;
+  artistApplied: number;
+  artistCapacityCeiling: number;
+  odtApplied: number;
+  odtCapacityCeiling: number;
 }) {
   if (capacityCeiling <= 0) return null;
   const isClosed = forceDone || spotsRemaining <= 0;
   const isAlmostFull = !isClosed && capacityCeiling > 0 && (applied / capacityCeiling) >= 0.75;
   const percent = Math.min(100, (applied / capacityCeiling) * 100);
+  const hasBothRoles = artistCapacityCeiling > 0 && odtCapacityCeiling > 0;
+  const barColor =
+    roleLabel === "ODT"
+      ? isClosed
+        ? "bg-red-400"
+        : isAlmostFull
+          ? "bg-orange-300"
+          : "bg-violet-400"
+      : isClosed
+        ? "bg-red-400"
+        : isAlmostFull
+          ? "bg-orange-300"
+          : "bg-blue-400";
 
   return (
     <div className="mt-3 space-y-1.5">
-      <div className="flex items-center justify-between text-xs">
+      <div className="flex items-center justify-between text-xs gap-2">
         <span className="font-semibold text-gray-700">
-          נרשמו: <span className="text-gray-900">{applied} / {capacityCeiling}</span>
+          <span className={roleLabel === "ODT" ? "text-violet-700" : "text-blue-700"}>{roleLabel}</span>
+          {": "}
+          <span className="text-gray-900">{applied} / {capacityCeiling}</span>
+          <span className="text-gray-400 font-normal"> נרשמו</span>
         </span>
-        <span className={`font-medium ${isClosed ? "text-red-500" : isAlmostFull ? "text-orange-400" : "text-emerald-600"}`}>
+        <span className={`font-medium text-left ${isClosed ? "text-red-500" : isAlmostFull ? "text-orange-400" : "text-emerald-600"}`}>
           {isClosed
             ? "נסגרה קבלת מועמדויות"
-            : `${spotsRemaining} מקומות פתוחים להגשה`}
+            : `${spotsRemaining} מקומות פתוחים`}
         </span>
       </div>
 
+      {hasBothRoles && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <RoleCapacityBadge
+            label="ODT"
+            applied={odtApplied}
+            ceiling={odtCapacityCeiling}
+            accent="violet"
+          />
+          <RoleCapacityBadge
+            label="אומנים"
+            applied={artistApplied}
+            ceiling={artistCapacityCeiling}
+            accent="blue"
+          />
+        </div>
+      )}
+
       <div className="w-full bg-gray-100 rounded-full h-1.5">
         <div
-          className={`h-1.5 rounded-full transition-all duration-300 ${
-            isClosed ? "bg-red-400" : isAlmostFull ? "bg-orange-300" : "bg-blue-400"
-          }`}
+          className={`h-1.5 rounded-full transition-all duration-300 ${barColor}`}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -190,20 +258,17 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
         </div>
 
         {/* Spots bar */}
-        {(() => {
-          const isOdt = userRole === "ODT";
-          const myBaseRequired = isOdt ? order.odtRequired : order.requiredCount;
-          const myApplied = isOdt ? order.odtAssigned : order.assignedCount;
-          const myCapacityCeiling = myBaseRequired > 0 ? Math.ceil(myBaseRequired * 1.5) : 0;
-          return (
-            <SpotsBar
-              applied={myApplied}
-              capacityCeiling={myCapacityCeiling}
-              spotsRemaining={order.spotsRemaining}
-              forceDone={isAssignmentDone}
-            />
-          );
-        })()}
+        <SpotsBar
+          roleLabel={order.roleLabel}
+          applied={order.roleApplied}
+          capacityCeiling={order.roleCapacityCeiling}
+          spotsRemaining={order.spotsRemaining}
+          forceDone={isAssignmentDone}
+          artistApplied={order.assignedCount}
+          artistCapacityCeiling={order.artistCapacityCeiling}
+          odtApplied={order.odtAssigned}
+          odtCapacityCeiling={order.odtCapacityCeiling}
+        />
 
         {/* Error */}
         {error && (
