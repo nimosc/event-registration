@@ -14,8 +14,8 @@ export async function postJsonWebhook(url: string, body: unknown): Promise<void>
 }
 
 /**
- * Awaits POST so it finishes before the serverless response closes (Netlify/Vercel
- * often drop detached promises). Swallows errors — Monday is already updated.
+ * Awaits POST so it finishes before the serverless response closes (Vercel
+ * often drops detached promises). Swallows errors — Monday is already updated.
  */
 export async function postJsonWebhookOrLog(url: string, body: unknown): Promise<void> {
   try {

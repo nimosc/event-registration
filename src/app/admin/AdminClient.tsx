@@ -400,16 +400,18 @@ function OrderAccordion({
     }
   }
 
-  const registrants: Registrant[] = order.subitems.map((sub) => ({
-    id: sub.id,
-    name: sub.name,
-    role: sub.role,
-    artistType: sub.artistType,
-    attendanceStatus: sub.attendanceStatus,
-    candidacyStatus: sub.candidacyStatus,
-    hasCandidacyDateConflict: sub.hasCandidacyDateConflict,
-    candidacyDateConflictMessage: sub.candidacyDateConflictMessage,
-  }));
+  const registrants: Registrant[] = order.subitems
+    .filter((sub) => statusMode !== "arrival" || isCandidacyApproved(sub.candidacyStatus))
+    .map((sub) => ({
+      id: sub.id,
+      name: sub.name,
+      role: sub.role,
+      artistType: sub.artistType,
+      attendanceStatus: sub.attendanceStatus,
+      candidacyStatus: sub.candidacyStatus,
+      hasCandidacyDateConflict: sub.hasCandidacyDateConflict,
+      candidacyDateConflictMessage: sub.candidacyDateConflictMessage,
+    }));
 
   const totalRequired = order.requiredCount + order.requiredOdtCount;
   const filledPercent =
@@ -424,7 +426,12 @@ function OrderAccordion({
 
   const pendingCount =
     statusMode === "arrival"
-      ? order.subitems.filter((s) => s.attendanceStatus !== "מאושר" && s.attendanceStatus !== "נדחה").length
+      ? order.subitems.filter(
+          (s) =>
+            isCandidacyApproved(s.candidacyStatus) &&
+            s.attendanceStatus !== "מאושר" &&
+            s.attendanceStatus !== "נדחה"
+        ).length
       : order.subitems.filter(
           (s) =>
             (s.candidacyStatus ?? "") !== "מאושר" &&
@@ -701,13 +708,22 @@ function matchesTimeFilter(dateStr: string, mode: TimeFilterMode): boolean {
   return mode === "past" ? eventDate < today : eventDate >= today;
 }
 
+function isCandidacyApproved(candidacyStatus?: string): boolean {
+  return (candidacyStatus ?? "") === "מאושר";
+}
+
 function hasPendingConfirmation(
   order: AdminOrder,
   mode: "candidacy" | "arrival"
 ): boolean {
   return order.subitems.some((s) => {
-    const cur = mode === "arrival" ? s.attendanceStatus : s.candidacyStatus ?? "";
-    if (mode === "candidacy" && s.hasCandidacyDateConflict) return false;
+    if (mode === "arrival") {
+      if (!isCandidacyApproved(s.candidacyStatus)) return false;
+      const cur = s.attendanceStatus;
+      return cur !== "מאושר" && cur !== "נדחה";
+    }
+    const cur = s.candidacyStatus ?? "";
+    if (s.hasCandidacyDateConflict) return false;
     return cur !== "מאושר" && cur !== "נדחה";
   });
 }

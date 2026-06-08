@@ -207,7 +207,7 @@ export default function RegistrantsList({
   if (registrants.length === 0) {
     return (
       <div className="text-center py-6 text-gray-400 text-sm">
-        אין נרשמים עדיין
+        {statusMode === "arrival" ? "אין מועמדויות מאושרות לאישור הגעה" : "אין נרשמים עדיין"}
       </div>
     );
   }
