@@ -411,11 +411,11 @@ export default function OrdersClient({ user }: OrdersClientProps) {
           </div>
 
           {/* Stats row */}
-          {!loading && orders.length > 0 && (
+          {!loading && filteredOrders.length > 0 && (
             <div className="flex gap-3 mt-5 flex-wrap">
               <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm">
                 <span className="w-2 h-2 rounded-full bg-blue-400" />
-                <span className="text-gray-700 font-medium">{orders.length}</span>
+                <span className="text-gray-700 font-medium">{filteredOrders.length}</span>
                 <span className="text-gray-500">הזמנות</span>
               </div>
               {myOrders.length > 0 && (
