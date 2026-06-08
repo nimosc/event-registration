@@ -47,51 +47,19 @@ function formatDateDDMMYYYY(dateStr: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function RoleCapacityBadge({
-  label, applied, ceiling, accent,
-}: {
-  label: string;
-  applied: number;
-  ceiling: number;
-  accent: "violet" | "blue";
-}) {
-  if (ceiling <= 0) return null;
-  const isFull = applied >= ceiling;
-  const styles =
-    accent === "violet"
-      ? isFull
-        ? "bg-violet-200 text-violet-800"
-        : "bg-violet-100 text-violet-700"
-      : isFull
-        ? "bg-blue-200 text-blue-800"
-        : "bg-blue-100 text-blue-700";
-
-  return (
-    <span className={`inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full ${styles}`}>
-      {label}: {applied}/{ceiling}
-    </span>
-  );
-}
-
 function SpotsBar({
   roleLabel, applied, capacityCeiling, spotsRemaining, forceDone,
-  artistApplied, artistCapacityCeiling, odtApplied, odtCapacityCeiling,
 }: {
   roleLabel: "ODT" | "אומנים";
   applied: number;
   capacityCeiling: number;
   spotsRemaining: number;
   forceDone?: boolean;
-  artistApplied: number;
-  artistCapacityCeiling: number;
-  odtApplied: number;
-  odtCapacityCeiling: number;
 }) {
   if (capacityCeiling <= 0) return null;
   const isClosed = forceDone || spotsRemaining <= 0;
   const isAlmostFull = !isClosed && capacityCeiling > 0 && (applied / capacityCeiling) >= 0.75;
   const percent = Math.min(100, (applied / capacityCeiling) * 100);
-  const hasBothRoles = artistCapacityCeiling > 0 && odtCapacityCeiling > 0;
   const barColor =
     roleLabel === "ODT"
       ? isClosed
@@ -120,23 +88,6 @@ function SpotsBar({
             : `${spotsRemaining} מקומות פתוחים`}
         </span>
       </div>
-
-      {hasBothRoles && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <RoleCapacityBadge
-            label="ODT"
-            applied={odtApplied}
-            ceiling={odtCapacityCeiling}
-            accent="violet"
-          />
-          <RoleCapacityBadge
-            label="אומנים"
-            applied={artistApplied}
-            ceiling={artistCapacityCeiling}
-            accent="blue"
-          />
-        </div>
-      )}
 
       <div className="w-full bg-gray-100 rounded-full h-1.5">
         <div
@@ -264,10 +215,6 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
           capacityCeiling={order.roleCapacityCeiling}
           spotsRemaining={order.spotsRemaining}
           forceDone={isAssignmentDone}
-          artistApplied={order.assignedCount}
-          artistCapacityCeiling={order.artistCapacityCeiling}
-          odtApplied={order.odtAssigned}
-          odtCapacityCeiling={order.odtCapacityCeiling}
         />
 
         {/* Error */}
