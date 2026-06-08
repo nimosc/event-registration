@@ -13,6 +13,8 @@ import {
   STATUS_CANCELLED,
   parseDropdownLabel,
   mapMondayAttendanceToInternal,
+  mapMondayCandidacyToInternal,
+  CANDIDACY_STATUS_COLUMN_ID,
   getLiveArtistRole,
   getOrderCapacityState,
   isRegistrationOpenForRole,
@@ -44,6 +46,7 @@ export interface OrderData {
   isRoleOpen: boolean;
   isRegistered: boolean;
   subitemId?: string;
+  candidacyStatus?: string;
   subitems: SubitemData[];
 }
 
@@ -52,6 +55,7 @@ export interface SubitemData {
   name: string;
   linkedArtistIds: number[];
   attendanceStatus: string;
+  candidacyStatus: string;
 }
 
 export async function GET() {
@@ -112,12 +116,16 @@ export async function GET() {
           const attendanceCol = sub.column_values.find(
             (cv) => cv.id === "color_mm18bjdk"
           );
+          const candidacyCol = sub.column_values.find(
+            (cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID
+          );
 
           return {
             id: sub.id,
             name: sub.name,
             linkedArtistIds: parseLinkedItemIds(relationCol?.value),
             attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
+            candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
           };
         });
 
@@ -161,6 +169,7 @@ export async function GET() {
               : 999,
           isRegistered: !!mySubitem,
           subitemId: mySubitem?.id,
+          candidacyStatus: mySubitem?.candidacyStatus || undefined,
           subitems,
         };
       })

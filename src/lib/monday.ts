@@ -487,6 +487,7 @@ export const ORDER_ACTIVITY_HOURS_COLUMN_ID = "text_mm2b57xq";
 export const ARTIST_ACTIVE_STATUS_COLUMN_ID = "color_mm18wjry";
 export const ODT_REQUIRED_COLUMN_ID = "numeric_mm387qc7";
 export const ODT_ASSIGNED_COLUMN_ID = "numeric_mm3b6rnr";
+export const SUBITEM_ARTIST_TYPE_COLUMN_ID = "color_mm3bjfvg";
 export const ARTIST_REQUIRED_COLUMN_ID = "numeric_mm185aw7";
 export const ARTIST_ASSIGNED_COLUMN_ID = "numeric_mm18d914";
 export const STATUS_OPEN = "בתהליך שיבוץ";
@@ -659,7 +660,7 @@ export async function getOpenOrders() {
             subitems {
               id
               name
-              column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk"]) {
+              column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}"]) {
                 id
                 text
                 value
@@ -1092,7 +1093,8 @@ export async function updateArtistLocation(
 export async function createSubitem(
   orderId: string,
   artistName: string,
-  artistId: string
+  artistId: string,
+  artistType?: RegistrationRole
 ): Promise<{ id: string }> {
   // Step 1: Create the subitem
   const createQuery = `
@@ -1143,6 +1145,23 @@ export async function createSubitem(
   `;
 
   await mondayQuery(dateQuery);
+
+  if (artistType) {
+    const typeQuery = `
+      mutation {
+        change_column_value(
+          board_id: ${BOARDS.SUBITEMS},
+          item_id: ${subitemId},
+          column_id: "${SUBITEM_ARTIST_TYPE_COLUMN_ID}",
+          value: ${JSON.stringify(JSON.stringify({ label: artistType }))}
+        ) {
+          id
+        }
+      }
+    `;
+    await mondayQuery(typeQuery);
+  }
+
   return { id: subitemId };
 }
 

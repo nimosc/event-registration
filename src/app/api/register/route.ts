@@ -120,7 +120,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Create subitem
-    const subitem = await createSubitem(orderId, session.name, session.id);
+    const subitem = await createSubitem(
+      orderId,
+      session.name,
+      session.id,
+      isOdt ? "ODT" : undefined
+    );
 
     // Update per-role assigned count
     const newAssigned = myAssigned + 1;

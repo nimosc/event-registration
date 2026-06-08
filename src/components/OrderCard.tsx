@@ -23,6 +23,7 @@ export interface Order {
   isRoleOpen: boolean;
   isRegistered: boolean;
   subitemId?: string;
+  candidacyStatus?: string;
 }
 
 const HEBREW_MONTHS: Record<number, string> = {
@@ -121,6 +122,7 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
 
   const isAssignmentDone = order.status === "הסתיים השיבוץ";
   const isCancelled = order.status === "בוטל";
+  const isApproved = order.candidacyStatus === "מאושר";
   const isClosedForRole = !order.isRoleOpen;
   const isPast = order.date ? new Date(order.date) < new Date(new Date().toDateString()) : false;
   const formattedDateForTitle = formatDateDDMMYYYY(order.date);
@@ -145,10 +147,10 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
 
   return (
     <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 hover:shadow-md ${
-      isCancelled ? "border-red-200 opacity-75" : order.isRegistered ? "border-blue-200" : "border-gray-100"
+      isCancelled ? "border-red-200 opacity-75" : order.isRegistered ? (isApproved ? "border-green-200" : "border-blue-200") : "border-gray-100"
     }`}>
       {/* Top accent */}
-      <div className={`h-1 ${isCancelled ? "bg-red-400" : order.isRegistered ? "bg-blue-500" : isAssignmentDone ? "bg-slate-400" : isClosedForRole ? "bg-gray-300" : "bg-emerald-400"}`} />
+      <div className={`h-1 ${isCancelled ? "bg-red-400" : order.isRegistered ? (isApproved ? "bg-green-500" : "bg-blue-500") : isAssignmentDone ? "bg-slate-400" : isClosedForRole ? "bg-gray-300" : "bg-emerald-400"}`} />
 
       <div className="p-5">
         {/* Cancelled banner */}
@@ -167,11 +169,23 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
             {orderTitle}
           </h3>
           {order.isRegistered && !isCancelled && (
-            <span className="flex-shrink-0 inline-flex items-center gap-1 bg-blue-100 text-blue-600 text-xs font-semibold px-2.5 py-1 rounded-full">
+            <span
+              className={`flex-shrink-0 inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full ${
+                order.candidacyStatus === "מאושר"
+                  ? "bg-green-100 text-green-700"
+                  : order.candidacyStatus === "נדחה"
+                    ? "bg-red-100 text-red-600"
+                    : "bg-blue-100 text-blue-600"
+              }`}
+            >
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
               </svg>
-              מועמד
+              {order.candidacyStatus === "מאושר"
+                ? "מאושר"
+                : order.candidacyStatus === "נדחה"
+                  ? "נדחה"
+                  : "מועמד"}
             </span>
           )}
         </div>

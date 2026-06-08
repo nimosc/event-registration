@@ -93,6 +93,36 @@ function CollapsibleSection({
   );
 }
 
+function StatBadge({
+  count,
+  label,
+  dotColor,
+  bgClass,
+  borderClass,
+  countClass,
+  labelClass,
+}: {
+  count: number;
+  label: string;
+  dotColor: string;
+  bgClass: string;
+  borderClass: string;
+  countClass: string;
+  labelClass: string;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm border ${bgClass} ${borderClass} ${
+        count === 0 ? "opacity-60" : ""
+      }`}
+    >
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
+      <span className={`font-medium ${countClass}`}>{count}</span>
+      <span className={labelClass}>{label}</span>
+    </div>
+  );
+}
+
 function LoadingSkeleton() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -285,7 +315,12 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     date ? new Date(date) < new Date(new Date().toDateString()) : false;
 
   const cancelledOrders = filteredOrders.filter((o) => o.status === "בוטל");
-  const myOrders = filteredOrders.filter(o => o.isRegistered && o.status !== "בוטל");
+  const myApprovedOrders = filteredOrders.filter(
+    (o) => o.isRegistered && o.status !== "בוטל" && o.candidacyStatus === "מאושר"
+  );
+  const myOrders = filteredOrders.filter(
+    (o) => o.isRegistered && o.status !== "בוטל" && o.candidacyStatus !== "מאושר"
+  );
   const assignmentDoneOrders = filteredOrders.filter(
     (o) => !o.isRegistered && o.status === "הסתיים השיבוץ" && !isPastOrder(o.date)
   );
@@ -410,35 +445,72 @@ export default function OrdersClient({ user }: OrdersClientProps) {
             </button>
           </div>
 
-          {/* Stats row */}
-          {!loading && filteredOrders.length > 0 && (
-            <div className="flex gap-3 mt-5 flex-wrap">
-              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm">
-                <span className="w-2 h-2 rounded-full bg-blue-400" />
-                <span className="text-gray-700 font-medium">{filteredOrders.length}</span>
-                <span className="text-gray-500">הזמנות</span>
-              </div>
-              {myOrders.length > 0 && (
-                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-sm">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
-                  <span className="text-blue-700 font-medium">{myOrders.length}</span>
-                  <span className="text-blue-600">המועמדויות שלי</span>
-                </div>
-              )}
-              {openOrders.length > 0 && (
-                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2 text-sm">
-                  <span className="w-2 h-2 rounded-full bg-green-500" />
-                  <span className="text-green-700 font-medium">{openOrders.length}</span>
-                  <span className="text-green-600">פתוחות למועמדות</span>
-                </div>
-              )}
-              {assignmentDoneOrders.length > 0 && (
-                <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 text-sm">
-                  <span className="w-2 h-2 rounded-full bg-slate-500" />
-                  <span className="text-slate-700 font-medium">{assignmentDoneOrders.length}</span>
-                  <span className="text-slate-600">הסתיים השיבוץ</span>
-                </div>
-              )}
+          {/* Stats row — always show all categories for the active filter */}
+          {!loading && (
+            <div className="flex gap-2 mt-5 flex-wrap">
+              <StatBadge
+                count={filteredOrders.length}
+                label="הזמנות"
+                dotColor="bg-gray-400"
+                bgClass="bg-white"
+                borderClass="border-gray-200"
+                countClass="text-gray-700"
+                labelClass="text-gray-500"
+              />
+              <StatBadge
+                count={myApprovedOrders.length}
+                label="מועמדויות שאושרו"
+                dotColor="bg-green-500"
+                bgClass="bg-green-50"
+                borderClass="border-green-200"
+                countClass="text-green-700"
+                labelClass="text-green-600"
+              />
+              <StatBadge
+                count={myOrders.length}
+                label="המועמדויות שלי"
+                dotColor="bg-blue-500"
+                bgClass="bg-blue-50"
+                borderClass="border-blue-200"
+                countClass="text-blue-700"
+                labelClass="text-blue-600"
+              />
+              <StatBadge
+                count={openOrders.length}
+                label="פתוחות למועמדות"
+                dotColor="bg-emerald-500"
+                bgClass="bg-emerald-50"
+                borderClass="border-emerald-200"
+                countClass="text-emerald-700"
+                labelClass="text-emerald-600"
+              />
+              <StatBadge
+                count={closedOrders.length}
+                label="נסגרה קבלת מועמדויות"
+                dotColor="bg-gray-400"
+                bgClass="bg-gray-50"
+                borderClass="border-gray-200"
+                countClass="text-gray-600"
+                labelClass="text-gray-500"
+              />
+              <StatBadge
+                count={assignmentDoneOrders.length}
+                label="הסתיים השיבוץ"
+                dotColor="bg-slate-500"
+                bgClass="bg-slate-100"
+                borderClass="border-slate-200"
+                countClass="text-slate-700"
+                labelClass="text-slate-600"
+              />
+              <StatBadge
+                count={cancelledOrders.length}
+                label="בוטלו"
+                dotColor="bg-red-400"
+                bgClass="bg-red-50"
+                borderClass="border-red-200"
+                countClass="text-red-700"
+                labelClass="text-red-600"
+              />
             </div>
           )}
         </div>
@@ -537,6 +609,14 @@ export default function OrdersClient({ user }: OrdersClientProps) {
           <EmptyState filtered={selectedMonth !== "all" || selectedLocation !== "all"} />
         ) : (
           <div className="space-y-8">
+
+            <CollapsibleSection accentColor="bg-green-500" label="מועמדויות שאושרו" count={myApprovedOrders.length} countBg="bg-green-100" countColor="text-green-700" defaultOpen>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {myApprovedOrders.map(order => (
+                  <OrderCard key={order.id} order={order} onRegister={handleRegister} onUnregister={handleUnregister} userRole={user.role} />
+                ))}
+              </div>
+            </CollapsibleSection>
 
             <CollapsibleSection accentColor="bg-blue-500" label="המועמדויות שלי" count={myOrders.length} countBg="bg-blue-100" countColor="text-blue-600">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
