@@ -4,10 +4,12 @@ import {
   getColumnValue,
   getArtistTaxStatus,
   getArtistBankDetailsFields,
-  parseLinkedItemIds,
+  getLinkedItemIdsAsNumbers,
+  getLinkedItemIdsFromColumn,
   mapMondayAttendanceToInternal,
   mapMondayCandidacyToInternal,
   ORDER_ACTIVITY_HOURS_COLUMN_ID,
+  SUBITEM_INVOICE_RELATION_COLUMN_ID,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
@@ -37,6 +39,7 @@ export async function GET() {
       candidacyStatus: string;
       role: string;
       invoiceStatus: string;
+      linkedInvoiceId: string;
     }[] = [];
 
     for (const order of items) {
@@ -63,8 +66,12 @@ export async function GET() {
         const invoiceStatusCol = sub.column_values.find(
           (cv) => cv.id === "color_mm3pd8vf"
         );
+        const invoiceRelationCol = sub.column_values.find(
+          (cv) => cv.id === SUBITEM_INVOICE_RELATION_COLUMN_ID
+        );
 
-        const linkedIds = parseLinkedItemIds(relationCol?.value);
+        const linkedIds = getLinkedItemIdsAsNumbers(relationCol);
+        const linkedInvoiceIds = getLinkedItemIdsFromColumn(invoiceRelationCol);
 
         if (linkedIds.includes(artistId) || sub.name.trim() === session.name.trim()) {
           myRegistrations.push({
@@ -79,6 +86,7 @@ export async function GET() {
             candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
             role: roleCol?.text || "",
             invoiceStatus: invoiceStatusCol?.text || "",
+            linkedInvoiceId: linkedInvoiceIds[0] || "",
           });
         }
       }

@@ -4,6 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import NavBar from "@/components/NavBar";
 import { SessionUser } from "@/lib/auth";
 import { canSubmitInvoice, isInvoiceStatusEligible } from "@/lib/invoiceEligibility";
+import {
+  getFollowUpAccountingDocument,
+  getInitialDocumentForTaxStatus,
+  getSubmissionStatusDisplay,
+  getSubitemInvoiceStatusDisplay,
+  INVOICE_SUBMISSION_STATUS,
+  isAwaitingAccountingDocument,
+  isInvoiceSubmissionComplete,
+  isSubitemAwaitingAccounting,
+  isSubitemInvoiceComplete,
+  SUBITEM_INVOICE_STATUS,
+} from "@/lib/invoiceDocuments";
+import { invoiceAmountsMatch, validateExtractedAgainstExpected } from "@/lib/invoiceValidation";
 
 interface Registration {
   orderId: string;
@@ -15,6 +28,7 @@ interface Registration {
   attendanceStatus: string;
   candidacyStatus: string;
   invoiceStatus: string;
+  linkedInvoiceId?: string;
 }
 
 interface InvoiceDto {
@@ -34,6 +48,7 @@ interface InvoiceDto {
   amountNote: string;
   description: string;
   orderIds: string[];
+  submissionStatus: string;
 }
 
 interface InvoicesClientProps {
@@ -47,7 +62,7 @@ const HEBREW_MONTHS: Record<number, string> = {
 };
 
 const FIRST_EVENT_PAY_PATUR = 1000;
-const ADDITIONAL_EVENT_PAY_PATUR = 850;
+const ADDITIONAL_EVENT_PAY_PATUR = 800;
 const PAY_MORESH = 1000;
 
 function invoiceAmountsDiffer(expected: number, reported: number): boolean {
@@ -78,6 +93,57 @@ function monthKeyToLabel(key: string): string {
 function getCurrentMonthKey(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getLastMonthKeys(count: number): string[] {
+  const now = new Date();
+  const keys: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+function isRegistrationInvoiceComplete(
+  reg: Registration,
+  invoiceList: InvoiceDto[]
+): boolean {
+  if (isSubitemInvoiceComplete(reg.invoiceStatus)) return true;
+  const related = resolveInvoiceForRegistration(reg, invoiceList);
+  return isInvoiceSubmissionComplete(related?.submissionStatus || "");
+}
+
+function isRegistrationAwaitingAccounting(
+  reg: Registration,
+  invoiceList: InvoiceDto[]
+): boolean {
+  if (isRegistrationInvoiceComplete(reg, invoiceList)) return false;
+  if (isSubitemAwaitingAccounting(reg.invoiceStatus)) return true;
+  const related = resolveInvoiceForRegistration(reg, invoiceList);
+  return isAwaitingAccountingDocument(related?.submissionStatus || "");
+}
+
+function resolveInvoiceForRegistration(
+  reg: Registration,
+  invoiceList: InvoiceDto[]
+): InvoiceDto | null {
+  if (reg.linkedInvoiceId) {
+    const byId = invoiceList.find((inv) => inv.id === reg.linkedInvoiceId);
+    if (byId) return byId;
+  }
+  return (
+    invoiceList.find((inv) =>
+      (inv.orderIds || []).some((id) => String(id) === String(reg.orderId))
+    ) ?? null
+  );
+}
+
+function resolveInvoiceIdForRegistration(
+  reg: Registration,
+  invoiceList: InvoiceDto[]
+): string {
+  return resolveInvoiceForRegistration(reg, invoiceList)?.id || reg.linkedInvoiceId || "";
 }
 
 function formatDateDDMMYY(dateStr: string): string {
@@ -119,6 +185,13 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthKey());
   const [artistStatus, setArtistStatus] = useState<"מורשה" | "פטור" | "">("");
+  const needsTaxStatusPrompt = !loading && !artistStatus;
+  const initialDocumentConfig = artistStatus
+    ? getInitialDocumentForTaxStatus(artistStatus)
+    : null;
+  const followUpAccountingDocument = getFollowUpAccountingDocument();
+  const [editingTaxStatus, setEditingTaxStatus] = useState(false);
+  const [savingTaxStatus, setSavingTaxStatus] = useState(false);
   const [artistBankDetails, setArtistBankDetails] = useState({
     beneficiaryName: "",
     bankCode: "",
@@ -127,6 +200,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   });
   const [invoices, setInvoices] = useState<InvoiceDto[]>([]);
   const [showMonthInvoiceModal, setShowMonthInvoiceModal] = useState(false);
+  const [showVoluntaryModal, setShowVoluntaryModal] = useState(false);
+  const [eventsDescription, setEventsDescription] = useState("");
+  const [voluntaryAmount, setVoluntaryAmount] = useState("");
   const [monthSelectedOrderIds, setMonthSelectedOrderIds] = useState<Set<string>>(new Set());
   const [invoiceForm, setInvoiceForm] = useState({
     beneficiaryName: "",
@@ -145,6 +221,19 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   const [customAmountValue, setCustomAmountValue] = useState("");
   const [customAmountNote, setCustomAmountNote] = useState("");
   const [extractedActualAmount, setExtractedActualAmount] = useState<number | null>(null);
+  const [showAccountingModal, setShowAccountingModal] = useState(false);
+  const [accountingInvoiceId, setAccountingInvoiceId] = useState("");
+  const [accountingFile, setAccountingFile] = useState<File | null>(null);
+  const [accountingInvoiceNumber, setAccountingInvoiceNumber] = useState("");
+  const [submittingAccounting, setSubmittingAccounting] = useState(false);
+  const [submittingAccountingSeconds, setSubmittingAccountingSeconds] = useState(0);
+  const [extractingAccountingFile, setExtractingAccountingFile] = useState(false);
+  const [accountingExtractedAmount, setAccountingExtractedAmount] = useState<number | null>(null);
+  const [accountingExtractedNumber, setAccountingExtractedNumber] = useState("");
+  const accountingInvoice = useMemo(
+    () => invoices.find((inv) => inv.id === accountingInvoiceId) ?? null,
+    [invoices, accountingInvoiceId]
+  );
   const missingBankFields = useMemo(() => {
     const missing: string[] = [];
     if (!invoiceForm.beneficiaryName.trim()) missing.push("שם מוטב");
@@ -160,25 +249,31 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   const getSubmitBlockingReason = useCallback(
     (selectedCount: number, expectedAmount: number) => {
       if (selectedCount <= 0) return "בחר לפחות אירוע אחד";
-      if (!invoiceFile) return "צרף קובץ חשבונית";
+      if (!invoiceFile) return `צרף ${initialDocumentConfig?.fileLabel ?? "מסמך"}`;
       if (missingBankFields.length > 0) return `השלם פרטי בנק: ${missingBankFields.join(", ")}`;
       const reported = getReportedInvoiceAmount(expectedAmount, customAmountEnabled, customAmountValue);
       if (invoiceAmountsDiffer(expectedAmount, reported) && !customAmountNote.trim()) {
         return "סיבה לשינוי הסכום";
       }
+      if (extractedActualAmount != null && !invoiceAmountsMatch(reported, extractedActualAmount)) {
+        return "הסכום בקובץ לא תואם לסכום להגשה";
+      }
       return "";
     },
-    [customAmountEnabled, customAmountNote, customAmountValue, invoiceFile, missingBankFields]
+    [customAmountEnabled, customAmountNote, customAmountValue, extractedActualAmount, initialDocumentConfig?.fileLabel, invoiceFile, missingBankFields]
   );
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [regRes, invRes] = await Promise.all([
-        fetch("/api/my-registrations"),
-        fetch("/api/invoices"),
-      ]);
+      const invRes = await fetch("/api/invoices");
+      if (invRes.ok) {
+        const invData = await invRes.json();
+        setInvoices((invData.invoices ?? []) as InvoiceDto[]);
+      }
+
+      const regRes = await fetch("/api/my-registrations");
       const regData = await regRes.json();
       if (!regRes.ok) {
         setError(regData.error || "שגיאה בטעינת נתונים");
@@ -196,35 +291,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         bankBranch: regData.bankBranch || "",
         bankAccount: regData.bankAccount || "",
       });
-
-      if (invRes.ok) {
-        const invData = await invRes.json();
-        setInvoices((invData.invoices ?? []) as InvoiceDto[]);
-        // #region agent log
-        fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6ee816" },
-          body: JSON.stringify({
-            sessionId: "6ee816",
-            runId: "run1",
-            hypothesisId: "H2",
-            location: "src/app/invoices/InvoicesClient.tsx:fetchData",
-            message: "Loaded invoices in client",
-            data: {
-              invoicesCount: (invData.invoices ?? []).length,
-              sample: (invData.invoices ?? []).slice(0, 5).map((inv: InvoiceDto) => ({
-                id: inv.id,
-                amount: inv.amount,
-                actualAmount: inv.actualAmount,
-                reportedAmount: inv.reportedAmount,
-                orderIds: inv.orderIds,
-              })),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-      }
     } catch {
       setError("שגיאת רשת.");
     } finally {
@@ -248,13 +314,25 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     return () => clearInterval(timer);
   }, [submittingInvoice]);
 
+  useEffect(() => {
+    if (!submittingAccounting) {
+      setSubmittingAccountingSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setSubmittingAccountingSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 250);
+    return () => clearInterval(timer);
+  }, [submittingAccounting]);
+
   const eligibleByStatus = useMemo(
     () => registrations.filter((r) => isInvoiceStatusEligible(r)),
     [registrations]
   );
 
   const availableMonths = useMemo(() => {
-    const keys = new Set<string>([getCurrentMonthKey()]);
+    const keys = new Set<string>(getLastMonthKeys(4));
     eligibleByStatus.forEach((r) => {
       const key = parseMonthKey(r.date);
       if (key) keys.add(key);
@@ -268,11 +346,46 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, [eligibleByStatus, selectedMonth]);
   const approvedAttendanceCount = filtered.filter((r) => r.attendanceStatus === "מאושר").length;
   const pendingAttendanceCount = filtered.filter((r) => !r.attendanceStatus).length;
-  const submittedCount = filtered.filter((r) => r.invoiceStatus === "הוגשה").length;
+  const pendingAccountingInvoices = useMemo(
+    () => invoices.filter((inv) => isAwaitingAccountingDocument(inv.submissionStatus)),
+    [invoices]
+  );
+  const awaitingAccountingRegsInMonth = useMemo(
+    () => filtered.filter((reg) => isRegistrationAwaitingAccounting(reg, invoices)),
+    [filtered, invoices]
+  );
+  const pendingAccountingInvoiceForSelectedMonth = useMemo(() => {
+    if (selectedMonth === "all" || awaitingAccountingRegsInMonth.length === 0) return null;
+    for (const reg of awaitingAccountingRegsInMonth) {
+      const related = resolveInvoiceForRegistration(reg, invoices);
+      if (related) return related;
+    }
+    const monthOrderIds = new Set(awaitingAccountingRegsInMonth.map((r) => String(r.orderId)));
+    return (
+      pendingAccountingInvoices.find((inv) =>
+        inv.orderIds.some((id) => monthOrderIds.has(String(id)))
+      ) ??
+      invoices.find((inv) => inv.orderIds.some((id) => monthOrderIds.has(String(id)))) ??
+      null
+    );
+  }, [awaitingAccountingRegsInMonth, invoices, pendingAccountingInvoices, selectedMonth]);
+  const pendingAccountingInvoiceIdForSelectedMonth = useMemo(() => {
+    if (pendingAccountingInvoiceForSelectedMonth) return pendingAccountingInvoiceForSelectedMonth.id;
+    const regWithLink = awaitingAccountingRegsInMonth.find((reg) => reg.linkedInvoiceId);
+    return regWithLink?.linkedInvoiceId || "";
+  }, [awaitingAccountingRegsInMonth, pendingAccountingInvoiceForSelectedMonth]);
+  const submittedCount = filtered.filter((r) => isRegistrationInvoiceComplete(r, invoices)).length;
+  const awaitingAccountingCount = filtered.filter((r) => isRegistrationAwaitingAccounting(r, invoices)).length;
   const readyToSubmitCount = filtered.filter((r) => canSubmitInvoice(r)).length;
+  const showVoluntaryUpload =
+    selectedMonth !== "all" && Boolean(artistStatus) && filtered.length === 0;
+  const voluntaryDocumentLabel =
+    artistStatus === "מורשה" ? "בקשת תשלום" : "קבלה";
 
   const { incomeBySubitemId } = useMemo(() => {
     const byId: Record<string, number> = {};
+    if (!artistStatus) return { incomeBySubitemId: byId };
+
     const byMonth = new Map<string, Registration[]>();
     for (const reg of filtered) {
       const key = parseMonthKey(reg.date) || "none";
@@ -293,19 +406,40 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     return { incomeBySubitemId: byId };
   }, [filtered, artistStatus]);
 
+  const handleTaxStatusChange = useCallback(async (taxStatus: "מורשה" | "פטור") => {
+    if (taxStatus === artistStatus || savingTaxStatus) return;
+    setSavingTaxStatus(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/profile/tax-status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taxStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "שגיאה בעדכון סוג העוסק");
+        return;
+      }
+      setArtistStatus(taxStatus);
+      setEditingTaxStatus(false);
+    } catch {
+      setError("שגיאת רשת בעדכון סוג העוסק");
+    } finally {
+      setSavingTaxStatus(false);
+    }
+  }, [artistStatus, savingTaxStatus]);
+
   const handleFileChange = useCallback(async (file: File | null) => {
     setInvoiceFile(file);
-    if (!file) return;
+    if (!file || !initialDocumentConfig?.extractFromFile) return;
     setExtractingFile(true);
     try {
       const fd = new FormData();
       fd.append("file", file, file.name);
       const res = await fetch("/api/invoices/extract", { method: "POST", body: fd });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "שגיאה בחילוץ נתוני החשבונית");
-        return;
-      }
+      if (!res.ok) return;
       setInvoiceForm((f) => ({
         ...f,
         invoiceNumber: data.receiptNumber || f.invoiceNumber,
@@ -315,13 +449,237 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         setExtractedActualAmount(data.amount);
         setCustomAmountEnabled(true);
         setCustomAmountValue(String(data.amount));
+        setVoluntaryAmount(String(data.amount));
       }
     } catch {
-      setError("שגיאת רשת בחילוץ נתוני החשבונית");
+      // חילוץ אוטומטי הוא אופציונלי — הקובץ עדיין מצורף
     } finally {
       setExtractingFile(false);
     }
+  }, [initialDocumentConfig?.extractFromFile]);
+
+  const openAccountingModal = useCallback((invoiceId: string, invoiceNumber = "") => {
+    setAccountingInvoiceId(invoiceId);
+    setAccountingFile(null);
+    setAccountingInvoiceNumber(invoiceNumber);
+    setAccountingExtractedAmount(null);
+    setAccountingExtractedNumber("");
+    setShowAccountingModal(true);
   }, []);
+
+  const handleAccountingFileChange = useCallback(async (file: File | null) => {
+    setAccountingFile(file);
+    setAccountingExtractedAmount(null);
+    setAccountingExtractedNumber("");
+    if (!file || !followUpAccountingDocument.extractFromFile) return;
+    setExtractingAccountingFile(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const res = await fetch("/api/invoices/extract", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) return;
+      if (data.receiptNumber) {
+        setAccountingExtractedNumber(data.receiptNumber);
+        if (!accountingInvoiceNumber.trim()) {
+          setAccountingInvoiceNumber(data.receiptNumber);
+        }
+      }
+      if (data.amount != null) {
+        setAccountingExtractedAmount(Number(data.amount));
+      }
+    } catch {
+      // חילוץ אופציונלי
+    } finally {
+      setExtractingAccountingFile(false);
+    }
+  }, [accountingInvoiceNumber, followUpAccountingDocument.extractFromFile]);
+
+  const accountingValidationError = useMemo(() => {
+    if (!accountingInvoice || !accountingFile) return null;
+    const expectedAmount =
+      accountingInvoice.reportedAmount ?? accountingInvoice.actualAmount ?? accountingInvoice.amount;
+    return validateExtractedAgainstExpected({
+      extracted: {
+        receiptNumber: accountingExtractedNumber || accountingInvoiceNumber || null,
+        amount: accountingExtractedAmount,
+        description: null,
+      },
+      expectedAmount,
+      declaredNumber: accountingInvoiceNumber,
+      requireAmountWhenExtracted: true,
+      requireNumberWhenBothPresent: true,
+    });
+  }, [
+    accountingExtractedAmount,
+    accountingExtractedNumber,
+    accountingFile,
+    accountingInvoice,
+    accountingInvoiceNumber,
+  ]);
+
+  const handleSubmitAccountingDocument = useCallback(async () => {
+    if (!accountingInvoiceId || !accountingFile) {
+      setError("חובה לצרף חשבונית מס קבלה");
+      return;
+    }
+    if (!accountingInvoiceNumber.trim()) {
+      setError("חובה למלא מספר חשבונית / קבלה");
+      return;
+    }
+    if (accountingValidationError) {
+      setError(accountingValidationError);
+      return;
+    }
+    setSubmittingAccounting(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("invoiceId", accountingInvoiceId);
+      fd.append("file", accountingFile, accountingFile.name);
+      if (accountingInvoiceNumber.trim()) {
+        fd.append("invoiceNumber", accountingInvoiceNumber.trim());
+      }
+      const res = await fetch("/api/invoices/accounting-document", { method: "POST", body: fd });
+      let data: { error?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        setError(res.ok ? "שגיאה בפענוח תשובת השרת" : `שגיאת שרת (${res.status}) — נסה שוב`);
+        return;
+      }
+      if (!res.ok) {
+        setError(data.error || "שגיאה בהעלאת מסמך חשבונאי");
+        return;
+      }
+      setShowAccountingModal(false);
+      setAccountingInvoiceId("");
+      setAccountingFile(null);
+      setAccountingInvoiceNumber("");
+      setAccountingExtractedAmount(null);
+      setAccountingExtractedNumber("");
+      setInvoiceSuccess("הרשומה עודכנה — חשבונית מס קבלה הוגשה בהצלחה");
+      setTimeout(() => setInvoiceSuccess(null), 5000);
+      await fetchData();
+    } catch {
+      setError("שגיאת רשת.");
+    } finally {
+      setSubmittingAccounting(false);
+    }
+  }, [
+    accountingFile,
+    accountingInvoiceId,
+    accountingInvoiceNumber,
+    accountingValidationError,
+    fetchData,
+  ]);
+
+  const openVoluntaryModal = useCallback(() => {
+    setEventsDescription("");
+    setVoluntaryAmount("");
+    setInvoiceForm({
+      beneficiaryName: artistBankDetails.beneficiaryName,
+      bankCode: artistBankDetails.bankCode,
+      bankBranch: artistBankDetails.bankBranch,
+      bankAccount: artistBankDetails.bankAccount,
+      invoiceNumber: "",
+      description: "",
+    });
+    setInvoiceFile(null);
+    setExtractedActualAmount(null);
+    setShowVoluntaryModal(true);
+  }, [artistBankDetails]);
+
+  const handleSubmitVoluntaryInvoice = useCallback(async () => {
+    if (!eventsDescription.trim()) {
+      setError("יש לפרט עבור אילו אירועים מדובר");
+      return;
+    }
+    const amount = Number(voluntaryAmount);
+    if (!voluntaryAmount || Number.isNaN(amount) || amount <= 0) {
+      setError("יש למלא סכום להגשה");
+      return;
+    }
+    if (!invoiceFile) {
+      setError(`חובה לצרף ${initialDocumentConfig?.fileLabel ?? "מסמך"}`);
+      return;
+    }
+    if (!hasCompleteBankDetails) {
+      setError(`חובה למלא פרטי חשבון בנק: ${missingBankFields.join(", ")}`);
+      return;
+    }
+    if (extractedActualAmount != null && !invoiceAmountsMatch(amount, extractedActualAmount)) {
+      setError("הסכום בקובץ לא תואם לסכום להגשה");
+      return;
+    }
+
+    setSubmittingInvoice(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("voluntarySubmission", "true");
+      fd.append("eventsDescription", eventsDescription.trim());
+      fd.append("orderIds", "[]");
+      fd.append("subitemIds", "[]");
+      fd.append("amount", String(amount));
+      fd.append("eventDate", `${selectedMonth}-01`);
+      fd.append("monthLabel", monthKeyToLabel(selectedMonth));
+      fd.append("monthKey", selectedMonth);
+      fd.append("beneficiaryName", invoiceForm.beneficiaryName);
+      fd.append("bankCode", invoiceForm.bankCode);
+      fd.append("bankBranch", invoiceForm.bankBranch);
+      fd.append("bankAccount", invoiceForm.bankAccount);
+      fd.append(
+        "bankDetails",
+        [invoiceForm.beneficiaryName, invoiceForm.bankCode, invoiceForm.bankBranch, invoiceForm.bankAccount]
+          .filter(Boolean)
+          .join(" / ")
+      );
+      fd.append("invoiceNumber", invoiceForm.invoiceNumber);
+      fd.append("description", invoiceForm.description);
+      fd.append("file", invoiceFile, invoiceFile.name);
+
+      const res = await fetch("/api/invoices", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "שגיאה בהגשת מסמך");
+        return;
+      }
+
+      setShowVoluntaryModal(false);
+      setEventsDescription("");
+      setVoluntaryAmount("");
+      setInvoiceForm({ beneficiaryName: "", bankCode: "", bankBranch: "", bankAccount: "", invoiceNumber: "", description: "" });
+      setInvoiceFile(null);
+      setExtractedActualAmount(null);
+      setInvoiceSuccess(
+        `המסמך הוגש לבדיקה — ${amount.toLocaleString("he-IL")} ₪. נבדוק את הפרטים ונעדכן.`
+      );
+      setArtistBankDetails({
+        beneficiaryName: invoiceForm.beneficiaryName,
+        bankCode: invoiceForm.bankCode,
+        bankBranch: invoiceForm.bankBranch,
+        bankAccount: invoiceForm.bankAccount,
+      });
+      setTimeout(() => setInvoiceSuccess(null), 5000);
+      await fetchData();
+    } catch {
+      setError("שגיאת רשת.");
+    } finally {
+      setSubmittingInvoice(false);
+    }
+  }, [
+    eventsDescription,
+    extractedActualAmount,
+    fetchData,
+    hasCompleteBankDetails,
+    initialDocumentConfig?.fileLabel,
+    invoiceFile,
+    invoiceForm,
+    missingBankFields,
+    selectedMonth,
+    voluntaryAmount,
+  ]);
 
   const handleSubmitInvoice = useCallback(async (
     orderIds: string[],
@@ -336,7 +694,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       return;
     }
     if (!invoiceFile) {
-      setError("חובה לצרף קובץ חשבונית");
+      setError(`חובה לצרף ${initialDocumentConfig?.fileLabel ?? "מסמך"}`);
       return;
     }
     if (!hasCompleteBankDetails) {
@@ -392,7 +750,11 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setCustomAmountValue("");
       setCustomAmountNote("");
       setExtractedActualAmount(null);
-      setInvoiceSuccess(`החשבונית הוגשה בהצלחה — ${amount.toLocaleString("he-IL")} ₪`);
+      setInvoiceSuccess(
+        initialDocumentConfig?.kind === "payment_request"
+          ? `בקשת התשלום הוגשה בהצלחה — ${amount.toLocaleString("he-IL")} ₪`
+          : `${initialDocumentConfig?.fileLabel ?? "המסמך"} הוגש בהצלחה — ${amount.toLocaleString("he-IL")} ₪`
+      );
       setArtistBankDetails({
         beneficiaryName: invoiceForm.beneficiaryName,
         bankCode: invoiceForm.bankCode,
@@ -406,7 +768,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     } finally {
       setSubmittingInvoice(false);
     }
-  }, [customAmountEnabled, customAmountNote, customAmountValue, fetchData, hasCompleteBankDetails, invoiceFile, invoiceForm, missingBankFields]);
+  }, [customAmountEnabled, customAmountNote, customAmountValue, fetchData, hasCompleteBankDetails, initialDocumentConfig, invoiceFile, invoiceForm, missingBankFields]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -416,8 +778,50 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         <div className="mb-8">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">הגשת חשבוניות</h1>
-              <p className="text-sm text-gray-500 mt-1">הגשת חשבונית מתבצעת פעם בחודש מהכפתור בראש הטבלה</p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <h1 className="text-2xl font-bold text-gray-900">הגשת חשבוניות</h1>
+                {!loading && artistStatus && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1 text-sm font-medium text-gray-700">
+                      סוג עוסק: {artistStatus}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingTaxStatus((v) => !v)}
+                      disabled={savingTaxStatus}
+                      className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2 disabled:opacity-50"
+                    >
+                      {savingTaxStatus ? "שומר..." : editingTaxStatus ? "סגור" : "שנה"}
+                    </button>
+                    {editingTaxStatus && (
+                      <div className="flex items-center gap-1.5">
+                        {(["מורשה", "פטור"] as const).map((status) => (
+                          <button
+                            key={status}
+                            type="button"
+                            onClick={() => handleTaxStatusChange(status)}
+                            disabled={savingTaxStatus || status === artistStatus}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                              status === artistStatus
+                                ? "border-gray-900 bg-gray-900 text-white"
+                                : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                            }`}
+                          >
+                            {status}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                {artistStatus === "מורשה"
+                  ? "עוסק מורשה: תחילה מגישים בקשת תשלום, ולאחר קבלת התשלום — חשבונית מס קבלה"
+                  : artistStatus === "פטור"
+                    ? "עוסק פטור: מגישים קבלה כמסמך חשבונאי"
+                    : "הגשת מסמכים מתבצעת פעם בחודש מהכפתור בראש הטבלה"}
+              </p>
             </div>
             <button
               onClick={fetchData}
@@ -454,12 +858,48 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
               </div>
               <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm">
                 <span className="h-2 w-2 rounded-full bg-slate-500" />
-                <span className="text-slate-600">כבר הוגשו</span>
+                <span className="text-slate-600">הושלמו</span>
                 <span className="font-semibold text-slate-800">{submittedCount}</span>
               </div>
+              {awaitingAccountingCount > 0 && (
+                <div className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-sm">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  <span className="text-amber-700">ממתינות לחשבונית מס קבלה</span>
+                  <span className="font-semibold text-amber-800">{awaitingAccountingCount}</span>
+                </div>
+              )}
             </div>
           )}
         </div>
+
+        {!loading && pendingAccountingInvoices.length > 0 && (
+          <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold text-amber-900">
+                  הגשת בקשת תשלום — צריך להגיש חשבונית מס קבלה
+                </p>
+                <p className="text-sm text-amber-800 mt-1">
+                  לכל חודש יש רשומה נפרדת — העלה חשבונית מס קבלה לכל חודש בנפרד (לא מסמך אחד לכמה חודשים).
+                </p>
+              </div>
+            </div>
+            <ul className="mt-4 space-y-2 text-sm text-amber-900">
+              {pendingAccountingInvoices.map((inv) => (
+                <li key={inv.id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-white/70 px-3 py-2">
+                  <span>{inv.name}</span>
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
+                    onClick={() => openAccountingModal(inv.id, inv.invoiceNumber || "")}
+                  >
+                    העלה חשבונית מס קבלה
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {!loading && (
           <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
@@ -489,7 +929,23 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 </button>
               ))}
               </div>
-              {filtered.length > 0 && selectedMonth !== "all" && (
+              {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length > 0 && pendingAccountingInvoiceIdForSelectedMonth && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const inv = pendingAccountingInvoiceForSelectedMonth
+                      ?? invoices.find((i) => i.id === pendingAccountingInvoiceIdForSelectedMonth);
+                    openAccountingModal(
+                      pendingAccountingInvoiceIdForSelectedMonth,
+                      inv?.invoiceNumber || ""
+                    );
+                  }}
+                  className="btn-primary inline-flex items-center justify-center gap-2 text-sm"
+                >
+                  העלה חשבונית מס קבלה לחודש
+                </button>
+              )}
+              {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length === 0 && readyToSubmitCount > 0 && (
                 <button
                   type="button"
                   onClick={() => {
@@ -514,7 +970,16 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   }}
                   className="btn-secondary inline-flex items-center justify-center gap-2 text-sm"
                 >
-                  העלה חשבוניות לחודש
+                  {artistStatus === "מורשה" ? "העלה בקשת תשלום לחודש" : "העלה קבלה לחודש"}
+                </button>
+              )}
+              {showVoluntaryUpload && (
+                <button
+                  type="button"
+                  onClick={openVoluntaryModal}
+                  className="btn-secondary inline-flex items-center justify-center gap-2 text-sm"
+                >
+                  חסר במערכת? העלה {voluntaryDocumentLabel}
                 </button>
               )}
             </div>
@@ -527,7 +992,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           </div>
         )}
 
-        {error && (
+        {error && !needsTaxStatusPrompt && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-600 text-sm">
             {error}
           </div>
@@ -543,63 +1008,51 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center text-gray-500">
-            אין אירועים זכאים לחשבונית בטווח שנבחר
+          <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center">
+            <p className="text-gray-500">
+              {selectedMonth === "all"
+                ? "אין אירועים זכאים לחשבונית בטווח שנבחר"
+                : `אין אירועים זכאים לחשבונית ב${monthKeyToLabel(selectedMonth)}`}
+            </p>
+            {showVoluntaryUpload && (
+              <div className="mt-6 max-w-lg mx-auto space-y-4">
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  במידה וחסר מידע במערכת, מוזמנים להעלות{" "}
+                  <span className="font-medium text-gray-800">{voluntaryDocumentLabel}</span>
+                  {artistStatus === "מורשה"
+                    ? " (ולאחר קבלת התשלום — חשבונית מס קבלה)"
+                    : ""}
+                  . יש לפרט עבור אילו אירועים מדובר — נבדוק אצלנו.
+                </p>
+                <button
+                  type="button"
+                  onClick={openVoluntaryModal}
+                  className="btn-primary"
+                >
+                  העלה {voluntaryDocumentLabel} לבדיקה
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-right border-collapse">
+              <table className="w-full min-w-[520px] text-right border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">מיקום</th>
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">תאריך</th>
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">סטטוס נוכחות</th>
-                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">סכום</th>
-                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">הסכום שדווח</th>
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">סטטוס חשבונית</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map((reg) => {
-                    const amount = incomeBySubitemId[reg.subitemId] ?? 0;
-                    const isSubmitted = reg.invoiceStatus === "הוגשה";
                     const regOrderId = String(reg.orderId);
-                    const relatedInvoice = invoices.find((inv) =>
-                      (inv.orderIds || []).some((id) => String(id) === regOrderId)
-                    );
-                    const reportedAmountForRow =
-                      relatedInvoice?.reportedAmount != null && !Number.isNaN(relatedInvoice.reportedAmount)
-                        ? relatedInvoice.reportedAmount
-                        : null;
-                    const displayAmount = isSubmitted && reportedAmountForRow != null
-                      ? reportedAmountForRow
-                      : amount;
-                    // #region agent log
-                    if (isSubmitted) {
-                      fetch("http://127.0.0.1:7442/ingest/30911afa-0e0f-4dec-b9b6-19b34bf7d632", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6ee816" },
-                        body: JSON.stringify({
-                          sessionId: "6ee816",
-                          runId: "run1",
-                          hypothesisId: "H3",
-                          location: "src/app/invoices/InvoicesClient.tsx:tableRow",
-                          message: "Computed submitted row display amount",
-                          data: {
-                            regOrderId,
-                            calculatedAmount: amount,
-                            matchedInvoiceId: relatedInvoice?.id || "",
-                            matchedInvoiceOrderIds: relatedInvoice?.orderIds || [],
-                            matchedReportedAmount: relatedInvoice?.reportedAmount ?? null,
-                            matchedActualAmount: relatedInvoice?.actualAmount ?? null,
-                            finalDisplayAmount: displayAmount,
-                          },
-                          timestamp: Date.now(),
-                        }),
-                      }).catch(() => {});
-                    }
-                    // #endregion
+                    const relatedInvoice = resolveInvoiceForRegistration(reg, invoices);
+                    const isSubmitted = isRegistrationInvoiceComplete(reg, invoices);
+                    const awaitingAccountingDoc = isRegistrationAwaitingAccounting(reg, invoices);
+                    const accountingInvoiceId = resolveInvoiceIdForRegistration(reg, invoices);
                     return (
                       <tr key={reg.subitemId} className="hover:bg-gray-50/70 transition-colors">
                         <td className="px-5 py-4 font-medium text-gray-900">{reg.location || reg.orderName || "—"}</td>
@@ -607,20 +1060,33 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                         <td className="px-5 py-4">
                           <AttendanceBadge status={reg.attendanceStatus} />
                         </td>
-                        <td className="px-5 py-4 text-gray-700 tabular-nums">{displayAmount.toLocaleString("he-IL")} ₪</td>
-                        <td className="px-5 py-4 text-gray-700 tabular-nums">
-                          {reportedAmountForRow != null
-                            ? `${reportedAmountForRow.toLocaleString("he-IL")} ₪`
-                            : "—"}
-                        </td>
                         <td className="px-5 py-4">
                           {isSubmitted ? (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                              הוגשה
+                              {SUBITEM_INVOICE_STATUS.SUBMITTED}
                             </span>
+                          ) : awaitingAccountingDoc ? (
+                            <div className="flex flex-col items-end gap-2">
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 max-w-xs text-right leading-snug">
+                                {getSubitemInvoiceStatusDisplay(SUBITEM_INVOICE_STATUS.PAYMENT_REQUEST)}
+                              </span>
+                              {(accountingInvoiceId || reg.linkedInvoiceId) && (
+                                <button
+                                  type="button"
+                                  className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
+                                  onClick={() => {
+                                    const invId = accountingInvoiceId || reg.linkedInvoiceId || "";
+                                    const inv = invoices.find((i) => i.id === invId);
+                                    openAccountingModal(invId, inv?.invoiceNumber || "");
+                                  }}
+                                >
+                                  העלה חשבונית מס קבלה
+                                </button>
+                              )}
+                            </div>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200">
-                              טרם הוגשה
+                              {getSubitemInvoiceStatusDisplay(reg.invoiceStatus)}
                             </span>
                           )}
                         </td>
@@ -641,26 +1107,39 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="px-4 py-3 text-xs font-semibold text-gray-600">חשבונית</th>
                   <th className="px-4 py-3 text-xs font-semibold text-gray-600">תאריך</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-gray-600">סכום</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-gray-600">סטטוס</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-gray-600">סטטוס מסמך</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-gray-600">פעולה</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {invoices.map((inv) => (
                   (() => {
-                    const displayAmount =
-                      inv.reportedAmount != null && !Number.isNaN(inv.reportedAmount)
-                        ? inv.reportedAmount
-                        : inv.amount;
+                    const needsAccountingUpload = isAwaitingAccountingDocument(inv.submissionStatus);
                     return (
-                  <tr key={inv.id}>
+                  <tr key={inv.id} className={needsAccountingUpload ? "bg-amber-50/40" : undefined}>
                     <td className="px-4 py-3 font-medium text-gray-800">{inv.name}</td>
                     <td className="px-4 py-3 text-gray-500 tabular-nums">{formatDateDDMMYY(inv.date)}</td>
-                    <td className="px-4 py-3 font-semibold text-gray-800 tabular-nums">{displayAmount.toLocaleString("he-IL")} ₪</td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-gray-50 text-gray-600 border-gray-200">
-                        {inv.status || "ממתין"}
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border max-w-xs text-right leading-snug ${
+                        needsAccountingUpload
+                          ? "bg-amber-50 text-amber-800 border-amber-200"
+                          : "bg-gray-50 text-gray-600 border-gray-200"
+                      }`}>
+                        {getSubmissionStatusDisplay(inv.submissionStatus || inv.status)}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {needsAccountingUpload ? (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
+                          onClick={() => openAccountingModal(inv.id, inv.invoiceNumber || "")}
+                        >
+                          העלה {followUpAccountingDocument.fileLabel}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
                     </td>
                   </tr>
                     );
@@ -671,17 +1150,143 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           </div>
         )}
 
+        {showVoluntaryModal && selectedMonth !== "all" && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowVoluntaryModal(false)}>
+            <div className="relative bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden border border-gray-200 flex flex-col" onClick={(e) => e.stopPropagation()}>
+              {submittingInvoice && (
+                <div className="absolute inset-0 z-10 bg-white/90 flex flex-col items-center justify-center gap-3 rounded-2xl px-6 text-center">
+                  <span className="h-8 w-8 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
+                  <span className="text-base font-semibold text-gray-800">ההגשה בבדיקה</span>
+                  <span className="text-sm text-gray-600">זה עשוי לקחת כ-15 שניות</span>
+                </div>
+              )}
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  הגשה ידנית — {voluntaryDocumentLabel}
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">{monthKeyToLabel(selectedMonth)}</p>
+                <p className="text-sm text-amber-800 mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                  חסר מידע במערכת? העלה {voluntaryDocumentLabel}, פרט עבור אילו אירועים מדובר — נבדוק אצלנו.
+                </p>
+              </div>
+              <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">
+                    עבור אילו אירועים? <span className="text-red-500">*</span>
+                  </span>
+                  <textarea
+                    className="input-field mt-1 min-h-[88px] resize-y"
+                    placeholder="לדוגמה: 15/03 — תל אביב, 22/03 — חיפה"
+                    value={eventsDescription}
+                    onChange={(e) => setEventsDescription(e.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">
+                    סכום להגשה <span className="text-red-500">*</span>
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="input-field mt-1"
+                    placeholder="סכום בשקלים"
+                    value={voluntaryAmount}
+                    onChange={(e) => setVoluntaryAmount(e.target.value)}
+                  />
+                </label>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+                  <div className="text-sm font-semibold text-gray-800">פרטי בנק</div>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="שם המוטב"
+                    value={invoiceForm.beneficiaryName}
+                    onChange={(e) => setInvoiceForm((f) => ({ ...f, beneficiaryName: e.target.value }))}
+                  />
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="קוד בנק"
+                      value={invoiceForm.bankCode}
+                      onChange={(e) => setInvoiceForm((f) => ({ ...f, bankCode: e.target.value }))}
+                    />
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="סניף"
+                      value={invoiceForm.bankBranch}
+                      onChange={(e) => setInvoiceForm((f) => ({ ...f, bankBranch: e.target.value }))}
+                    />
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="חשבון"
+                      value={invoiceForm.bankAccount}
+                      onChange={(e) => setInvoiceForm((f) => ({ ...f, bankAccount: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">
+                    {initialDocumentConfig?.fileLabel ?? "מסמך"} <span className="text-red-500">*</span>
+                  </span>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className="mt-2 block w-full text-sm"
+                    onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {invoiceFile && initialDocumentConfig?.extractFromFile && (
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="מספר חשבונית / קבלה"
+                    value={invoiceForm.invoiceNumber}
+                    onChange={(e) => setInvoiceForm((f) => ({ ...f, invoiceNumber: e.target.value }))}
+                  />
+                )}
+                {extractingFile && (
+                  <p className="text-sm text-blue-700">מחלץ נתונים מהקובץ...</p>
+                )}
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">הערות נוספות</span>
+                  <input
+                    type="text"
+                    className="input-field mt-1"
+                    placeholder="אופציונלי"
+                    value={invoiceForm.description}
+                    onChange={(e) => setInvoiceForm((f) => ({ ...f, description: e.target.value }))}
+                  />
+                </label>
+                <div className="flex gap-2 justify-end pt-2">
+                  <button type="button" onClick={() => setShowVoluntaryModal(false)} className="btn-secondary" disabled={submittingInvoice}>
+                    ביטול
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={submittingInvoice}
+                    onClick={handleSubmitVoluntaryInvoice}
+                  >
+                    {submittingInvoice ? "שולח..." : `הגש ${voluntaryDocumentLabel} לבדיקה`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showMonthInvoiceModal && filtered.length > 0 && selectedMonth !== "all" && (() => {
           const selectedRegs = filtered
             .filter((r) => monthSelectedOrderIds.has(r.orderId) && canSubmitInvoice(r))
             .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
           const selectedIncomeBySubitemId: Record<string, number> = {};
           let monthTotal = 0;
-          for (let i = 0; i < selectedRegs.length; i++) {
-            const reg = selectedRegs[i];
-            const amount = artistStatus === "פטור"
-              ? i === 0 ? FIRST_EVENT_PAY_PATUR : ADDITIONAL_EVENT_PAY_PATUR
-              : PAY_MORESH;
+          for (const reg of selectedRegs) {
+            const amount = incomeBySubitemId[reg.subitemId] ?? 0;
             selectedIncomeBySubitemId[reg.subitemId] = amount;
             monthTotal += amount;
           }
@@ -707,13 +1312,26 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   </div>
                 )}
                 <div className="p-6 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">הגשת חשבונית לחודש</h3>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {initialDocumentConfig?.kind === "payment_request"
+                      ? "הגשת בקשת תשלום לחודש"
+                      : "הגשת קבלה לחודש"}
+                  </h3>
                   <p className="text-sm text-gray-500 mt-1">{monthKeyToLabel(selectedMonth)}</p>
+                  {initialDocumentConfig && (
+                    <p className="text-sm text-blue-700 mt-2">{initialDocumentConfig.fileHint}</p>
+                  )}
                 </div>
                 <div className="p-6 overflow-y-auto flex-1">
                   <ul className="mb-5 divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden text-sm">
                     {filtered.map((reg) => {
-                      const alreadyInvoiced = reg.invoiceStatus === "הוגשה";
+                      const relatedInvoiceForReg = invoices.find((inv) =>
+                        (inv.orderIds || []).some((id) => String(id) === String(reg.orderId))
+                      );
+                      const alreadyInvoiced =
+                        isSubitemInvoiceComplete(reg.invoiceStatus)
+                        || isSubitemAwaitingAccounting(reg.invoiceStatus)
+                        || Boolean(relatedInvoiceForReg);
                       const selected = monthSelectedOrderIds.has(reg.orderId);
                       const amount = selectedIncomeBySubitemId[reg.subitemId] ?? 0;
                       const requiresClaim = reg.attendanceStatus !== "מאושר";
@@ -765,7 +1383,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                       {selectedOrderIds.length > 0 ? "✓" : "•"} נבחרו אירועים להגשה
                     </div>
                     <div className={invoiceFile ? "text-emerald-700" : "text-amber-700"}>
-                      {invoiceFile ? "✓" : "•"} צורף קובץ חשבונית
+                      {invoiceFile ? "✓" : "•"} צורף {initialDocumentConfig?.fileLabel ?? "מסמך"}
                     </div>
                     <div className={hasCompleteBankDetails ? "text-emerald-700" : "text-amber-700"}>
                       {hasCompleteBankDetails ? "✓" : "•"} פרטי חשבון בנק מלאים
@@ -852,7 +1470,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                        קובץ חשבונית <span className="text-red-500">*</span>
+                        {initialDocumentConfig?.fileLabel ?? "מסמך"} <span className="text-red-500">*</span>
                       </label>
                       <label
                         className={`w-full sm:max-w-[360px] cursor-pointer rounded-xl border-2 px-4 py-3 transition-colors ${
@@ -863,7 +1481,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <span className={`text-sm font-medium ${invoiceFile ? "text-emerald-800" : "text-blue-800"}`}>
-                            {invoiceFile ? "הקובץ הועלה בהצלחה" : "לחץ/י כאן להעלאת קובץ חשבונית"}
+                            {invoiceFile
+                              ? "הקובץ הועלה בהצלחה"
+                              : `לחץ/י כאן להעלאת ${initialDocumentConfig?.fileLabel ?? "מסמך"}`}
                           </span>
                           <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${invoiceFile ? "bg-emerald-200 text-emerald-800" : "bg-blue-200 text-blue-800"}`}>
                             PDF / תמונה
@@ -875,7 +1495,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                         <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)} />
                       </label>
                     </div>
-                    {invoiceFile && (
+                    {invoiceFile && initialDocumentConfig?.extractFromFile && (
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <label className="text-sm font-medium text-gray-700 whitespace-nowrap">מספר חשבונית / קבלה</label>
                         <input
@@ -894,9 +1514,14 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                           מחלץ נתונים מהקובץ...
                         </div>
                         <p className="mt-1 text-xs text-blue-700">
-                          המערכת קוראת אוטומטית מספר חשבונית, תיאור וסכום (אם נמצא)
+                          המערכת בודקת שהסכום בקובץ תואם לסכום להגשה
                         </p>
                       </div>
+                    )}
+                    {extractedActualAmount != null && (
+                      <p className="text-xs text-gray-600">
+                        סכום שחולץ מהקובץ: {extractedActualAmount.toLocaleString("he-IL")} ₪
+                      </p>
                     )}
                     <div className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50">
                       <label className="flex items-center gap-2 cursor-pointer">
@@ -950,7 +1575,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                           ? "שולח..."
                           : submitBlockReason
                             ? `חסר: ${submitBlockReason}`
-                            : `הגש חשבונית — ${effectiveAmount.toLocaleString("he-IL")} ₪`}
+                            : initialDocumentConfig?.kind === "payment_request"
+                              ? `הגש בקשת תשלום — ${effectiveAmount.toLocaleString("he-IL")} ₪`
+                              : `הגש ${initialDocumentConfig?.fileLabel ?? "מסמך"} — ${effectiveAmount.toLocaleString("he-IL")} ₪`}
                       </button>
                     </div>
                   </form>
@@ -960,6 +1587,130 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           );
         })()}
       </main>
+
+      {showAccountingModal && accountingInvoiceId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
+          <div className="relative bg-white rounded-2xl shadow-xl max-w-lg w-full border border-gray-200" onClick={(e) => e.stopPropagation()}>
+            {submittingAccounting && (
+              <div className="absolute inset-0 z-10 bg-white/90 flex flex-col items-center justify-center gap-3 rounded-2xl px-6 text-center">
+                <span className="h-8 w-8 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
+                <span className="text-base font-semibold text-gray-800">ההגשה בבדיקה</span>
+                <span className="text-sm text-gray-600">בודקים את המסמך מול בקשת התשלום — עד כ-15 שניות</span>
+                <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-800 tabular-nums">
+                  <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                  {submittingAccountingSeconds} שניות
+                </span>
+              </div>
+            )}
+            <div className="p-6 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">עדכון רשומה — {followUpAccountingDocument.fileLabel}</h3>
+              {accountingInvoice && (
+                <>
+                  <p className="text-sm font-medium text-gray-800 mt-2">{accountingInvoice.name}</p>
+                  <p className="text-sm text-amber-800 mt-2">
+                    סכום שדווח בבקשת התשלום:{" "}
+                    {(accountingInvoice.reportedAmount ?? accountingInvoice.actualAmount ?? accountingInvoice.amount).toLocaleString("he-IL")} ₪
+                  </p>
+                </>
+              )}
+              <p className="text-sm text-gray-500 mt-1">{followUpAccountingDocument.fileHint}</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700">{followUpAccountingDocument.fileLabel} <span className="text-red-500">*</span></span>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="mt-2 block w-full text-sm"
+                  onChange={(e) => handleAccountingFileChange(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              {extractingAccountingFile && (
+                <div className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                  מחלץ נתונים מהקובץ ובודק התאמה לבקשת התשלום...
+                </div>
+              )}
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700">מספר חשבונית / קבלה <span className="text-red-500">*</span></span>
+                <input
+                  type="text"
+                  className="input-field mt-1"
+                  placeholder="לדוגמה: 12345"
+                  value={accountingInvoiceNumber}
+                  onChange={(e) => setAccountingInvoiceNumber(e.target.value)}
+                />
+              </label>
+              {accountingExtractedAmount != null && (
+                <p className="text-xs text-gray-600">
+                  סכום שחולץ מהקובץ: {accountingExtractedAmount.toLocaleString("he-IL")} ₪
+                </p>
+              )}
+              {accountingValidationError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {accountingValidationError}
+                </div>
+              )}
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={submittingAccounting}
+                  onClick={() => setShowAccountingModal(false)}
+                >
+                  ביטול
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={submittingAccounting || !accountingFile || !accountingInvoiceNumber.trim() || Boolean(accountingValidationError)}
+                  onClick={handleSubmitAccountingDocument}
+                >
+                  {submittingAccounting ? "מעדכן..." : `עדכן רשומה — ${followUpAccountingDocument.fileLabel}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {needsTaxStatusPrompt && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
+          <div
+            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tax-status-prompt-title"
+          >
+            <h2 id="tax-status-prompt-title" className="text-xl font-bold text-gray-900 mb-2">
+              סוג עוסק
+            </h2>
+            <p className="text-sm text-gray-600 mb-6">
+              לפני המשך להגשת חשבוניות, יש לבחור את סוג העוסק שלך:
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={() => handleTaxStatusChange("פטור")}
+                disabled={savingTaxStatus}
+                className="btn-primary w-full py-3 text-base disabled:opacity-50"
+              >
+                {savingTaxStatus ? "שומר..." : "עוסק פטור"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTaxStatusChange("מורשה")}
+                disabled={savingTaxStatus}
+                className="btn-secondary w-full py-3 text-base disabled:opacity-50"
+              >
+                {savingTaxStatus ? "שומר..." : "עוסק מורשה"}
+              </button>
+            </div>
+            {error && (
+              <p className="mt-4 text-sm text-red-600 text-center">{error}</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

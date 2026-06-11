@@ -7,7 +7,11 @@ export interface ExtractedInvoiceData {
   description: string | null;
 }
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+function getAnthropicClient(): Anthropic | null {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) return null;
+  return new Anthropic({ apiKey });
+}
 
 function resolveMediaType(file: File): string {
   if (file.type) return file.type;
@@ -22,7 +26,16 @@ function resolveMediaType(file: File): string {
   return "image/jpeg";
 }
 
+export function isInvoiceExtractAvailable(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+}
+
 export async function extractInvoiceData(file: File): Promise<ExtractedInvoiceData> {
+  const client = getAnthropicClient();
+  if (!client) {
+    return { receiptNumber: null, amount: null, description: null };
+  }
+
   const bytes = await file.arrayBuffer();
   const base64 = Buffer.from(bytes).toString("base64");
   const mediaType = resolveMediaType(file);

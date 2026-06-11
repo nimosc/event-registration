@@ -1,3 +1,5 @@
+import { isSubitemInvoiceBlocked } from "@/lib/invoiceDocuments";
+
 export interface InvoiceEligibilityInput {
   candidacyStatus?: string | null;
   attendanceStatus?: string | null;
@@ -15,5 +17,6 @@ export function isInvoiceStatusEligible(input: InvoiceEligibilityInput): boolean
 }
 
 export function canSubmitInvoice(input: InvoiceEligibilityInput): boolean {
-  return isInvoiceStatusEligible(input) && (input.invoiceStatus?.trim() || "") !== "הוגשה";
+  const invoiceStatus = input.invoiceStatus?.trim() || "";
+  return isInvoiceStatusEligible(input) && !isSubitemInvoiceBlocked(invoiceStatus);
 }

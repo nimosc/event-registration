@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { extractInvoiceData } from "@/lib/invoiceExtract";
+import { extractInvoiceData, isInvoiceExtractAvailable } from "@/lib/invoiceExtract";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -13,6 +13,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "לא צורף קובץ" }, { status: 400 });
   }
 
+  if (!isInvoiceExtractAvailable()) {
+    return NextResponse.json({
+      receiptNumber: null,
+      amount: null,
+      description: null,
+      skipped: true,
+      message: "חילוץ אוטומטי לא זמין — ניתן להמשיך ולהזין ידנית",
+    });
+  }
+
   try {
     const parsed = await extractInvoiceData(file);
     return NextResponse.json({
@@ -22,6 +32,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("Invoice extract error:", err);
-    return NextResponse.json({ error: "שגיאה בחילוץ נתוני החשבונית" }, { status: 500 });
+    return NextResponse.json({
+      receiptNumber: null,
+      amount: null,
+      description: null,
+      skipped: true,
+      message: "לא הצלחנו לחלץ נתונים מהקובץ — ניתן להמשיך ולהזין ידנית",
+    });
   }
 }
