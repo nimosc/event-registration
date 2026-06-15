@@ -624,73 +624,154 @@ export function areAllRelevantRolesAtCapacity(
   );
 }
 
-export interface OrderRegistrationCounts {
-  requiredArtist: number;
-  assignedArtist: number;
-  requiredOdt: number;
-  assignedOdt: number;
-}
-
-/** Orders that hit the old 150% registration cap before we switched to approval-based closure. */
-export function wasClosedUnderLegacyRegistrationCap(
-  requiredArtist: number,
-  assignedArtist: number,
-  requiredOdt: number,
-  assignedOdt: number
-): boolean {
-  const artistRelevant = requiredArtist > 0;
-  const odtRelevant = requiredOdt > 0;
-  const artistFull =
-    artistRelevant && assignedArtist >= Math.ceil(requiredArtist * 1.5);
-  const odtFull = odtRelevant && assignedOdt >= Math.ceil(requiredOdt * 1.5);
-  if (!artistRelevant && !odtRelevant) return false;
-  return (
-    (!artistRelevant || artistFull) &&
-    (!odtRelevant || odtFull)
-  );
-}
-
-export function shouldOrderBeAssignmentDone(
-  capacity: OrderCapacityState,
-  registration: OrderRegistrationCounts
-): boolean {
-  if (areAllRelevantRolesAtCapacity(capacity)) return true;
-  return wasClosedUnderLegacyRegistrationCap(
-    registration.requiredArtist,
-    registration.assignedArtist,
-    registration.requiredOdt,
-    registration.assignedOdt
-  );
-}
-
 export function getCandidacyOrderStatusFromCapacity(
   capacity: OrderCapacityState,
-  currentStatus: string,
-  registration?: OrderRegistrationCounts
+  currentStatus: string
 ): string {
   if (currentStatus === STATUS_CANCELLED) return STATUS_CANCELLED;
-  if (currentStatus === STATUS_CANDIDACY_CLOSED) return STATUS_CANDIDACY_CLOSED;
-  if (registration && shouldOrderBeAssignmentDone(capacity, registration)) {
-    return STATUS_ASSIGNMENT_DONE;
-  }
-  return STATUS_OPEN;
+  if (areAllRelevantRolesAtCapacity(capacity)) return STATUS_ASSIGNMENT_DONE;
+  return currentStatus;
 }
 
-export function getMisopenedOrderStatusRestore(
-  currentStatus: string,
-  capacity: OrderCapacityState,
-  registration: OrderRegistrationCounts
-): string | null {
-  if (currentStatus !== STATUS_OPEN) return null;
-  if (shouldOrderBeAssignmentDone(capacity, registration)) {
-    return STATUS_ASSIGNMENT_DONE;
+const ORDER_STATUS_COLUMN_ID = "color_mm18ej76";
+
+interface MondayActivityLog {
+  id: string;
+  event: string;
+  data: string;
+  created_at: string;
+}
+
+function parseStatusActivityLogData(data: string): {
+  pulse_id?: number;
+  pulse_name?: string;
+  valueText?: string;
+  previousText?: string;
+} {
+  try {
+    const parsed = JSON.parse(data) as {
+      pulse_id?: number;
+      pulse_name?: string;
+      value?: { label?: { text?: string } };
+      previous_value?: { label?: { text?: string } };
+    };
+    return {
+      pulse_id: parsed.pulse_id,
+      pulse_name: parsed.pulse_name,
+      valueText: parsed.value?.label?.text,
+      previousText: parsed.previous_value?.label?.text,
+    };
+  } catch {
+    return {};
   }
-  return null;
+}
+
+function activityLogTimeMs(createdAt: string): number {
+  const n = Number(createdAt);
+  if (Number.isFinite(n) && n > 1e15) return Math.floor(n / 10000);
+  const d = Date.parse(createdAt);
+  return Number.isFinite(d) ? d : 0;
+}
+
+async function fetchOrderStatusActivityLogs(
+  from = "2026-01-01T00:00:00Z",
+  to = new Date().toISOString()
+): Promise<MondayActivityLog[]> {
+  const all: MondayActivityLog[] = [];
+  for (let page = 1; page <= 100; page++) {
+    const query = `
+      query {
+        boards(ids: [${BOARDS.ORDERS}]) {
+          activity_logs(
+            page: ${page}
+            limit: 100
+            from: "${from}"
+            to: "${to}"
+            column_ids: ["${ORDER_STATUS_COLUMN_ID}"]
+          ) {
+            id
+            event
+            data
+            created_at
+          }
+        }
+      }
+    `;
+    const data = await mondayQuery<{
+      boards: Array<{ activity_logs: MondayActivityLog[] }>;
+    }>(query);
+    const logs = data.boards[0]?.activity_logs ?? [];
+    if (logs.length === 0) break;
+    all.push(...logs);
+    if (logs.length < 100) break;
+  }
+  return all;
+}
+
+/** Restore statuses wrongly reset to בתהליך שיבוץ using Monday activity log history. */
+export async function restoreOrderStatusesFromActivityLogs(
+  bugStartIso = "2026-06-14T00:00:00Z"
+): Promise<{
+  restored: Array<{ id: string; name: string; from: string; to: string }>;
+  skipped: number;
+}> {
+  const bugStartMs = new Date(bugStartIso).getTime();
+  const logs = await fetchOrderStatusActivityLogs();
+  const restoreByPulse = new Map<string, string>();
+
+  const byPulse = new Map<string, MondayActivityLog[]>();
+  for (const log of logs) {
+    if (log.event !== "update_column_value") continue;
+    const { pulse_id } = parseStatusActivityLogData(log.data);
+    if (!pulse_id) continue;
+    const key = String(pulse_id);
+    const list = byPulse.get(key) ?? [];
+    list.push(log);
+    byPulse.set(key, list);
+  }
+
+  for (const [pulseId, pulseLogs] of byPulse) {
+    const sorted = [...pulseLogs].sort(
+      (a, b) => activityLogTimeMs(a.created_at) - activityLogTimeMs(b.created_at)
+    );
+    const wrongful = sorted.find((log) => {
+      const { valueText, previousText } = parseStatusActivityLogData(log.data);
+      return (
+        valueText === STATUS_OPEN &&
+        !!previousText &&
+        previousText !== STATUS_OPEN &&
+        activityLogTimeMs(log.created_at) >= bugStartMs
+      );
+    });
+    if (!wrongful) continue;
+    const { previousText } = parseStatusActivityLogData(wrongful.data);
+    if (previousText) restoreByPulse.set(pulseId, previousText);
+  }
+
+  const items = await getAllOrders();
+  const restored: Array<{ id: string; name: string; from: string; to: string }> =
+    [];
+
+  for (const item of items) {
+    const current = getColumnValue(item, ORDER_STATUS_COLUMN_ID)?.text || "";
+    const target = restoreByPulse.get(item.id);
+    if (!target || current === target) continue;
+    if (current !== STATUS_OPEN && current !== STATUS_ASSIGNMENT_DONE) continue;
+    await updateOrderStatus(item.id, target);
+    restored.push({ id: item.id, name: item.name, from: current, to: target });
+  }
+
+  return { restored, skipped: items.length - restored.length };
 }
 
 export function getOrderRegistrationCountsFromMondayItem(
   item: MondayItem
-): OrderRegistrationCounts {
+): {
+  requiredArtist: number;
+  assignedArtist: number;
+  requiredOdt: number;
+  assignedOdt: number;
+} {
   return {
     requiredArtist:
       parseFloat(getColumnValue(item, ARTIST_REQUIRED_COLUMN_ID)?.text || "0") || 0,
@@ -701,30 +782,6 @@ export function getOrderRegistrationCountsFromMondayItem(
     assignedOdt:
       parseFloat(getColumnValue(item, ODT_ASSIGNED_COLUMN_ID)?.text || "0") || 0,
   };
-}
-
-export async function repairMisopenedOrderStatuses(): Promise<{
-  repaired: Array<{ id: string; name: string; from: string; to: string }>;
-  skipped: number;
-}> {
-  const items = await getAllOrders();
-  const repaired: Array<{ id: string; name: string; from: string; to: string }> =
-    [];
-
-  for (const item of items) {
-    const status = getColumnValue(item, "color_mm18ej76")?.text || "";
-    if (status === STATUS_CANCELLED) continue;
-
-    const registration = getOrderRegistrationCountsFromMondayItem(item);
-    const capacity = getOrderCapacityStateFromMondayItem(item);
-    const restore = getMisopenedOrderStatusRestore(status, capacity, registration);
-    if (!restore) continue;
-
-    await updateOrderStatus(item.id, restore);
-    repaired.push({ id: item.id, name: item.name, from: status, to: restore });
-  }
-
-  return { repaired, skipped: items.length - repaired.length };
 }
 
 export async function getAllArtists(extraColumnIds: string[] = []) {

@@ -27,14 +27,14 @@ function loadEnvLocal() {
 loadEnvLocal();
 
 async function main() {
-  const { repairMisopenedOrderStatuses } = await import("../src/lib/monday");
-  const result = await repairMisopenedOrderStatuses();
+  const { restoreOrderStatusesFromActivityLogs } = await import("../src/lib/monday");
+  const result = await restoreOrderStatusesFromActivityLogs();
   console.log(
     JSON.stringify(
       {
-        repairedCount: result.repaired.length,
+        restoredCount: result.restored.length,
         skipped: result.skipped,
-        repaired: result.repaired,
+        restored: result.restored,
       },
       null,
       2

@@ -5,15 +5,12 @@ import {
   createSubitem,
   deleteSubitem,
   updateAssignedCount,
-  updateOrderStatus,
   getColumnValue,
   parseLinkedItemIds,
   STATUS_CANCELLED,
   getOrderCapacityState,
   isRegistrationOpenForRole,
-  getCandidacyOrderStatusFromCapacity,
   getApprovedCountsFromMondaySubitems,
-  getOrderRegistrationCountsFromMondayItem,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
@@ -77,12 +74,11 @@ export async function POST(request: NextRequest) {
 
     const myAssigned = isOdt ? odtAssigned : artistAssigned;
     const myAssignedColumnId = isOdt ? "numeric_mm3b6rnr" : "numeric_mm18d914";
-    const registration = getOrderRegistrationCountsFromMondayItem(order);
     const approved = getApprovedCountsFromMondaySubitems(order.subitems || []);
     const capacity = getOrderCapacityState(
-      registration.requiredArtist,
+      requiredCount,
       approved.artist,
-      registration.requiredOdt,
+      requiredOdtCount,
       approved.odt
     );
     const roleForCapacity = isOdt ? "ODT" : "אומן";
@@ -123,30 +119,6 @@ export async function POST(request: NextRequest) {
     // Update per-role assigned count
     const newAssigned = myAssigned + 1;
     await updateAssignedCount(orderId, newAssigned, myAssignedColumnId);
-
-    const registrationAfterCreate: typeof registration = {
-      ...registration,
-      assignedArtist: isOdt
-        ? registration.assignedArtist
-        : registration.assignedArtist + 1,
-      assignedOdt: isOdt
-        ? registration.assignedOdt + 1
-        : registration.assignedOdt,
-    };
-    const capacityAfterCreate = getOrderCapacityState(
-      registrationAfterCreate.requiredArtist,
-      approved.artist,
-      registrationAfterCreate.requiredOdt,
-      approved.odt
-    );
-    const desiredStatus = getCandidacyOrderStatusFromCapacity(
-      capacityAfterCreate,
-      status,
-      registrationAfterCreate
-    );
-    if (desiredStatus !== status) {
-      await updateOrderStatus(orderId, desiredStatus);
-    }
 
     return NextResponse.json({
       success: true,
@@ -214,37 +186,6 @@ export async function DELETE(request: NextRequest) {
     // Update assigned count
     const newAssignedCount = Math.max(0, assignedCount - 1);
     await updateAssignedCount(orderId, newAssignedCount, deleteAssignedColumnId);
-
-    const statusCol = getColumnValue(order, "color_mm18ej76");
-    const status = statusCol?.text || "";
-    const registration = getOrderRegistrationCountsFromMondayItem(order);
-    const remainingSubitems = (order.subitems || []).filter((sub) => sub.id !== subitemId);
-    const approved = getApprovedCountsFromMondaySubitems(remainingSubitems);
-    const registrationAfterDelete: typeof registration = {
-      ...registration,
-      assignedArtist:
-        session.role === "ODT"
-          ? registration.assignedArtist
-          : Math.max(0, registration.assignedArtist - 1),
-      assignedOdt:
-        session.role === "ODT"
-          ? Math.max(0, registration.assignedOdt - 1)
-          : registration.assignedOdt,
-    };
-    const capacityAfterDelete = getOrderCapacityState(
-      registrationAfterDelete.requiredArtist,
-      approved.artist,
-      registrationAfterDelete.requiredOdt,
-      approved.odt
-    );
-    const desiredStatus = getCandidacyOrderStatusFromCapacity(
-      capacityAfterDelete,
-      status,
-      registrationAfterDelete
-    );
-    if (desiredStatus !== status) {
-      await updateOrderStatus(orderId, desiredStatus);
-    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

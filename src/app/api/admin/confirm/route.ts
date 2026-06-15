@@ -9,7 +9,6 @@ import {
   updateOrderStatus,
   getCandidacyOrderStatusFromCapacity,
   getOrderCapacityStateFromMondayItem,
-  getOrderRegistrationCountsFromMondayItem,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
@@ -70,11 +69,9 @@ export async function PATCH(request: NextRequest) {
         const liveOrder = await getOrderById(orderId);
         if (liveOrder) {
           const capacity = getOrderCapacityStateFromMondayItem(liveOrder);
-          const registration = getOrderRegistrationCountsFromMondayItem(liveOrder);
           const desiredStatus = getCandidacyOrderStatusFromCapacity(
             capacity,
-            currentStatus,
-            registration
+            currentStatus
           );
           if (desiredStatus !== currentStatus) {
             await updateOrderStatus(orderId, desiredStatus);
