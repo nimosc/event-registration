@@ -13,6 +13,7 @@ import {
   isRegistrationOpenForRole,
   getCandidacyOrderStatusFromCapacity,
   getApprovedCountsFromMondaySubitems,
+  getOrderRegistrationCountsFromMondayItem,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
@@ -76,11 +77,12 @@ export async function POST(request: NextRequest) {
 
     const myAssigned = isOdt ? odtAssigned : artistAssigned;
     const myAssignedColumnId = isOdt ? "numeric_mm3b6rnr" : "numeric_mm18d914";
+    const registration = getOrderRegistrationCountsFromMondayItem(order);
     const approved = getApprovedCountsFromMondaySubitems(order.subitems || []);
     const capacity = getOrderCapacityState(
-      requiredCount,
+      registration.requiredArtist,
       approved.artist,
-      requiredOdtCount,
+      registration.requiredOdt,
       approved.odt
     );
     const roleForCapacity = isOdt ? "ODT" : "אומן";
@@ -122,13 +124,26 @@ export async function POST(request: NextRequest) {
     const newAssigned = myAssigned + 1;
     await updateAssignedCount(orderId, newAssigned, myAssignedColumnId);
 
+    const registrationAfterCreate: typeof registration = {
+      ...registration,
+      assignedArtist: isOdt
+        ? registration.assignedArtist
+        : registration.assignedArtist + 1,
+      assignedOdt: isOdt
+        ? registration.assignedOdt + 1
+        : registration.assignedOdt,
+    };
     const capacityAfterCreate = getOrderCapacityState(
-      requiredCount,
+      registrationAfterCreate.requiredArtist,
       approved.artist,
-      requiredOdtCount,
+      registrationAfterCreate.requiredOdt,
       approved.odt
     );
-    const desiredStatus = getCandidacyOrderStatusFromCapacity(capacityAfterCreate, status);
+    const desiredStatus = getCandidacyOrderStatusFromCapacity(
+      capacityAfterCreate,
+      status,
+      registrationAfterCreate
+    );
     if (desiredStatus !== status) {
       await updateOrderStatus(orderId, desiredStatus);
     }
@@ -202,20 +217,31 @@ export async function DELETE(request: NextRequest) {
 
     const statusCol = getColumnValue(order, "color_mm18ej76");
     const status = statusCol?.text || "";
-    const requiredCol = getColumnValue(order, "numeric_mm185aw7");
-    const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
-    const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
-    const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
-
+    const registration = getOrderRegistrationCountsFromMondayItem(order);
     const remainingSubitems = (order.subitems || []).filter((sub) => sub.id !== subitemId);
     const approved = getApprovedCountsFromMondaySubitems(remainingSubitems);
+    const registrationAfterDelete: typeof registration = {
+      ...registration,
+      assignedArtist:
+        session.role === "ODT"
+          ? registration.assignedArtist
+          : Math.max(0, registration.assignedArtist - 1),
+      assignedOdt:
+        session.role === "ODT"
+          ? Math.max(0, registration.assignedOdt - 1)
+          : registration.assignedOdt,
+    };
     const capacityAfterDelete = getOrderCapacityState(
-      requiredCount,
+      registrationAfterDelete.requiredArtist,
       approved.artist,
-      requiredOdtCount,
+      registrationAfterDelete.requiredOdt,
       approved.odt
     );
-    const desiredStatus = getCandidacyOrderStatusFromCapacity(capacityAfterDelete, status);
+    const desiredStatus = getCandidacyOrderStatusFromCapacity(
+      capacityAfterDelete,
+      status,
+      registrationAfterDelete
+    );
     if (desiredStatus !== status) {
       await updateOrderStatus(orderId, desiredStatus);
     }

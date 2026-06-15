@@ -18,10 +18,8 @@ import {
   getLiveArtistRole,
   getOrderCapacityState,
   isRegistrationOpenForRole,
-  getCandidacyOrderStatusFromCapacity,
   countApprovedCandidaciesForRole,
   SUBITEM_ARTIST_TYPE_COLUMN_ID,
-  updateOrderStatus,
 } from "@/lib/monday";
 import { getSession, createSession, setSessionCookie } from "@/lib/auth";
 
@@ -149,12 +147,6 @@ export async function GET() {
 
         const orderLocation =
           orderLocationCol?.text?.trim() || parseDropdownLabel(orderLocationCol?.value)?.trim() || "";
-        const effectiveStatus = getCandidacyOrderStatusFromCapacity(capacity, status);
-        if (effectiveStatus !== status && status !== STATUS_CANCELLED) {
-          void updateOrderStatus(item.id, effectiveStatus).catch((err) => {
-            console.error(`[/api/orders] failed to sync status for ${item.id}:`, err);
-          });
-        }
         const registrationRole = session.role === "ODT" ? "ODT" : "אומן";
         const isOdt = session.role === "ODT";
         const roleState = isOdt ? capacity.odt : capacity.artist;
@@ -169,7 +161,7 @@ export async function GET() {
           location: locationCol?.text || "",
           activityHours: (activityHoursCol?.text || "").trim(),
           orderLocation,
-          status: effectiveStatus,
+          status,
           requiredCount,
           assignedCount,
           odtRequired,
@@ -180,9 +172,7 @@ export async function GET() {
           roleLabel: (isOdt ? "ODT" : "אומנים") as "ODT" | "אומנים",
           artistCapacityCeiling: artistCapacity,
           odtCapacityCeiling: odtCapacity,
-          isRoleOpen:
-            effectiveStatus !== STATUS_ASSIGNMENT_DONE &&
-            isRegistrationOpenForRole(registrationRole, capacity),
+          isRoleOpen: isRegistrationOpenForRole(registrationRole, capacity),
           spotsRemaining:
             roleCapacityCeiling > 0
               ? Math.max(0, roleCapacityCeiling - roleApproved)

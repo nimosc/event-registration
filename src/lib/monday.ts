@@ -624,13 +624,107 @@ export function areAllRelevantRolesAtCapacity(
   );
 }
 
+export interface OrderRegistrationCounts {
+  requiredArtist: number;
+  assignedArtist: number;
+  requiredOdt: number;
+  assignedOdt: number;
+}
+
+/** Orders that hit the old 150% registration cap before we switched to approval-based closure. */
+export function wasClosedUnderLegacyRegistrationCap(
+  requiredArtist: number,
+  assignedArtist: number,
+  requiredOdt: number,
+  assignedOdt: number
+): boolean {
+  const artistRelevant = requiredArtist > 0;
+  const odtRelevant = requiredOdt > 0;
+  const artistFull =
+    artistRelevant && assignedArtist >= Math.ceil(requiredArtist * 1.5);
+  const odtFull = odtRelevant && assignedOdt >= Math.ceil(requiredOdt * 1.5);
+  if (!artistRelevant && !odtRelevant) return false;
+  return (
+    (!artistRelevant || artistFull) &&
+    (!odtRelevant || odtFull)
+  );
+}
+
+export function shouldOrderBeAssignmentDone(
+  capacity: OrderCapacityState,
+  registration: OrderRegistrationCounts
+): boolean {
+  if (areAllRelevantRolesAtCapacity(capacity)) return true;
+  return wasClosedUnderLegacyRegistrationCap(
+    registration.requiredArtist,
+    registration.assignedArtist,
+    registration.requiredOdt,
+    registration.assignedOdt
+  );
+}
+
 export function getCandidacyOrderStatusFromCapacity(
   capacity: OrderCapacityState,
-  currentStatus: string
+  currentStatus: string,
+  registration?: OrderRegistrationCounts
 ): string {
   if (currentStatus === STATUS_CANCELLED) return STATUS_CANCELLED;
-  if (areAllRelevantRolesAtCapacity(capacity)) return STATUS_ASSIGNMENT_DONE;
+  if (currentStatus === STATUS_CANDIDACY_CLOSED) return STATUS_CANDIDACY_CLOSED;
+  if (registration && shouldOrderBeAssignmentDone(capacity, registration)) {
+    return STATUS_ASSIGNMENT_DONE;
+  }
   return STATUS_OPEN;
+}
+
+export function getMisopenedOrderStatusRestore(
+  currentStatus: string,
+  capacity: OrderCapacityState,
+  registration: OrderRegistrationCounts
+): string | null {
+  if (currentStatus !== STATUS_OPEN) return null;
+  if (shouldOrderBeAssignmentDone(capacity, registration)) {
+    return STATUS_ASSIGNMENT_DONE;
+  }
+  return null;
+}
+
+export function getOrderRegistrationCountsFromMondayItem(
+  item: MondayItem
+): OrderRegistrationCounts {
+  return {
+    requiredArtist:
+      parseFloat(getColumnValue(item, ARTIST_REQUIRED_COLUMN_ID)?.text || "0") || 0,
+    assignedArtist:
+      parseFloat(getColumnValue(item, ARTIST_ASSIGNED_COLUMN_ID)?.text || "0") || 0,
+    requiredOdt:
+      parseFloat(getColumnValue(item, ODT_REQUIRED_COLUMN_ID)?.text || "0") || 0,
+    assignedOdt:
+      parseFloat(getColumnValue(item, ODT_ASSIGNED_COLUMN_ID)?.text || "0") || 0,
+  };
+}
+
+export async function repairMisopenedOrderStatuses(): Promise<{
+  repaired: Array<{ id: string; name: string; from: string; to: string }>;
+  skipped: number;
+}> {
+  const items = await getAllOrders();
+  const repaired: Array<{ id: string; name: string; from: string; to: string }> =
+    [];
+
+  for (const item of items) {
+    const status = getColumnValue(item, "color_mm18ej76")?.text || "";
+    if (status === STATUS_CANCELLED) continue;
+
+    const registration = getOrderRegistrationCountsFromMondayItem(item);
+    const capacity = getOrderCapacityStateFromMondayItem(item);
+    const restore = getMisopenedOrderStatusRestore(status, capacity, registration);
+    if (!restore) continue;
+
+    await updateOrderStatus(item.id, restore);
+    repaired.push({ id: item.id, name: item.name, from: status, to: restore });
+  }
+
+  return { repaired, skipped: items.length - repaired.length };
 }
 
 export async function getAllArtists(extraColumnIds: string[] = []) {
@@ -1318,7 +1412,7 @@ export async function getOrderById(orderId: string) {
     query {
       items(ids: [${orderId}]) {
         id
-        column_values(ids: ["color_mm18ej76", "${ARTIST_REQUIRED_COLUMN_ID}", "${ODT_REQUIRED_COLUMN_ID}"]) {
+        column_values(ids: ["color_mm18ej76", "${ARTIST_REQUIRED_COLUMN_ID}", "${ODT_REQUIRED_COLUMN_ID}", "${ARTIST_ASSIGNED_COLUMN_ID}", "${ODT_ASSIGNED_COLUMN_ID}"]) {
           id
           text
         }

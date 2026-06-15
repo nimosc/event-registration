@@ -16,6 +16,7 @@ import {
   getOrderById,
   getOrderCapacityStateFromMondayItem,
   getCandidacyOrderStatusFromCapacity,
+  getOrderRegistrationCountsFromMondayItem,
 } from "@/lib/monday";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
 
@@ -77,9 +78,11 @@ export async function POST(request: NextRequest) {
     const liveOrder = await getOrderById(orderId);
     if (liveOrder) {
       const capacityAfterAssign = getOrderCapacityStateFromMondayItem(liveOrder);
+      const registration = getOrderRegistrationCountsFromMondayItem(liveOrder);
       const desiredCandidacyStatus = getCandidacyOrderStatusFromCapacity(
         capacityAfterAssign,
-        orderStatus
+        orderStatus,
+        registration
       );
       if (desiredCandidacyStatus !== orderStatus) {
         await updateOrderStatus(orderId, desiredCandidacyStatus);
