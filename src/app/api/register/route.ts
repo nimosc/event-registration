@@ -8,7 +8,6 @@ import {
   updateOrderStatus,
   getColumnValue,
   parseLinkedItemIds,
-  STATUS_ASSIGNMENT_DONE,
   STATUS_CANCELLED,
   getOrderCapacityState,
   isRegistrationOpenForRole,
@@ -47,7 +46,7 @@ export async function POST(request: NextRequest) {
     const statusCol = getColumnValue(order, "color_mm18ej76");
     const status = statusCol?.text || "";
 
-    if (status === STATUS_CANCELLED || status === STATUS_ASSIGNMENT_DONE) {
+    if (status === STATUS_CANCELLED) {
       return NextResponse.json(
         { error: "ההזמנה אינה פתוחה להגשת מועמדות" },
         { status: 400 }

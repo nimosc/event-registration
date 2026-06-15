@@ -21,6 +21,7 @@ import {
   getCandidacyOrderStatusFromCapacity,
   countApprovedCandidaciesForRole,
   SUBITEM_ARTIST_TYPE_COLUMN_ID,
+  updateOrderStatus,
 } from "@/lib/monday";
 import { getSession, createSession, setSessionCookie } from "@/lib/auth";
 
@@ -149,6 +150,11 @@ export async function GET() {
         const orderLocation =
           orderLocationCol?.text?.trim() || parseDropdownLabel(orderLocationCol?.value)?.trim() || "";
         const effectiveStatus = getCandidacyOrderStatusFromCapacity(capacity, status);
+        if (effectiveStatus !== status && status !== STATUS_CANCELLED) {
+          void updateOrderStatus(item.id, effectiveStatus).catch((err) => {
+            console.error(`[/api/orders] failed to sync status for ${item.id}:`, err);
+          });
+        }
         const registrationRole = session.role === "ODT" ? "ODT" : "אומן";
         const isOdt = session.role === "ODT";
         const roleState = isOdt ? capacity.odt : capacity.artist;

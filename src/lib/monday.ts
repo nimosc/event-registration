@@ -210,18 +210,33 @@ export function mapInternalAttendanceToMonday(value: string): string {
 //   "מועמדות אושרה" / "מועמדות נדחתה"
 export const CANDIDACY_STATUS_COLUMN_ID = "color_mm1q61p2";
 
+const MONDAY_CANDIDACY_APPROVED_LABELS = new Set([
+  "מועמדות אושרה",
+  "מאושר",
+  "אושר",
+]);
+
+const MONDAY_CANDIDACY_REJECTED_LABELS = new Set([
+  "מועמדות נדחתה",
+  "נדחה",
+]);
+
+/** Strict check for capacity / closure — do not treat "ממתין לאישור" as approved. */
+export function isMondayCandidacyApproved(
+  value: string | null | undefined
+): boolean {
+  return MONDAY_CANDIDACY_APPROVED_LABELS.has((value ?? "").trim());
+}
+
 export function mapMondayCandidacyToInternal(
   value: string | null | undefined
 ): string {
   const t = (value ?? "").trim();
   if (!t) return "";
-  if (t === "מועמדות אושרה" || t === "מאושר" || t === "אושר") return "מאושר";
-  if (t === "מועמדות נדחתה" || t === "נדחה") return "נדחה";
-  // Historical boards sometimes return free-text labels. Normalize common patterns.
-  if (t.includes("אושר")) return "מאושר";
+  if (isMondayCandidacyApproved(t)) return "מאושר";
+  if (MONDAY_CANDIDACY_REJECTED_LABELS.has(t)) return "נדחה";
   if (t.includes("נדח")) return "נדחה";
-  if (t.includes("הגיש") || t.includes("מועמד")) return "";
-  return t; // passthrough for already-normalized values
+  return "";
 }
 
 export function mapInternalCandidacyToMonday(value: string): string {
@@ -554,7 +569,7 @@ export function getApprovedCountsFromMondaySubitems(
   for (const sub of subitems) {
     const candidacyCol = sub.column_values.find((cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID);
     const artistTypeCol = sub.column_values.find((cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID);
-    if (mapMondayCandidacyToInternal(candidacyCol?.text || "") !== "מאושר") continue;
+    if (!isMondayCandidacyApproved(candidacyCol?.text)) continue;
     if ((artistTypeCol?.text || "").trim() === "ODT") odt++;
     else artist++;
   }

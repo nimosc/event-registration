@@ -50,11 +50,12 @@ function formatDateDDMMYYYY(dateStr: string): string {
 }
 
 function SpotsBar({
-  roleLabel, approved, required, spotsRemaining, forceDone,
+  roleLabel, approved, required, registered, spotsRemaining, forceDone,
 }: {
   roleLabel: "ODT" | "אומנים";
   approved: number;
   required: number;
+  registered: number;
   spotsRemaining: number;
   forceDone?: boolean;
 }) {
@@ -83,6 +84,7 @@ function SpotsBar({
           {": "}
           <span className="text-gray-900">{approved} / {required}</span>
           <span className="text-gray-400 font-normal"> מאושרים</span>
+          <span className="text-gray-400 font-normal"> · {registered} נרשמו</span>
         </span>
         <span className={`font-medium text-left ${isClosed ? "text-red-500" : isAlmostFull ? "text-orange-400" : "text-emerald-600"}`}>
           {isClosed
@@ -228,6 +230,7 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
           roleLabel={order.roleLabel}
           approved={order.roleApproved}
           required={order.roleCapacityCeiling}
+          registered={order.roleApplied}
           spotsRemaining={order.spotsRemaining}
           forceDone={isAssignmentDone}
         />
