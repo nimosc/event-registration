@@ -18,7 +18,11 @@ import {
   INVOICE_ACCOUNTING_FILE_COLUMN_ID,
   INVOICE_PAYMENT_REQUEST_FILE_COLUMN_ID,
 } from "@/lib/monday";
-import { canSubmitInvoice } from "@/lib/invoiceEligibility";
+import {
+  canSubmitInvoice,
+  getInvoiceMonthSubmissionError,
+  parseInvoiceMonthKey,
+} from "@/lib/invoiceEligibility";
 import { getInitialDocumentForTaxStatus, INVOICE_SUBMISSION_STATUS } from "@/lib/invoiceDocuments";
 import {
   extractInvoiceDataWithTimeout,
@@ -85,6 +89,12 @@ export async function POST(req: NextRequest) {
   const monthLabel = (formData.get("monthLabel") as string) || "";
   const monthKey = (formData.get("monthKey") as string) || "";
   const file = formData.get("file") as File | null;
+
+  const resolvedMonthKey = monthKey.trim() || parseInvoiceMonthKey(eventDate);
+  const monthSubmissionError = getInvoiceMonthSubmissionError(resolvedMonthKey);
+  if (monthSubmissionError) {
+    return NextResponse.json({ error: monthSubmissionError }, { status: 400 });
+  }
 
   if (!file || file.size === 0) {
     return NextResponse.json({ error: `חובה לצרף ${documentConfig.fileLabel}` }, { status: 400 });

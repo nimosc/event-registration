@@ -13,7 +13,8 @@ import {
   updateCandidacyConfirmation,
   STATUS_ASSIGNMENT_DONE,
   STATUS_CANCELLED,
-  getOrderCapacityState,
+  getOrderById,
+  getOrderCapacityStateFromMondayItem,
   getCandidacyOrderStatusFromCapacity,
 } from "@/lib/monday";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
@@ -56,9 +57,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "לא ניתן לשבץ להזמנה שבה הסתיים השיבוץ" }, { status: 400 });
     }
 
-    const requiredCol = getColumnValue(order, "numeric_mm185aw7");
     const assignedCol = getColumnValue(order, "numeric_mm18d914");
-    const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
     const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
 
     // prevent duplicates for this artist
@@ -72,26 +71,20 @@ export async function POST(request: NextRequest) {
     const subitem = await createSubitem(orderId, artistBasic.name, artistBasic.id);
     const newAssignedCount = assignedCount + 1;
     await updateAssignedCount(orderId, newAssignedCount);
-    const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
-    const odtAssignedCol = getColumnValue(order, "numeric_mm3b6rnr");
-    const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
-    const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
-    const capacityAfterAssign = getOrderCapacityState(
-      requiredCount,
-      newAssignedCount,
-      requiredOdtCount,
-      odtAssigned
-    );
-    const desiredCandidacyStatus = getCandidacyOrderStatusFromCapacity(
-      capacityAfterAssign,
-      orderStatus
-    );
-    if (desiredCandidacyStatus !== orderStatus) {
-      await updateOrderStatus(orderId, desiredCandidacyStatus);
-    }
-
     // Mark candidacy as approved since this is an admin assignment.
     await updateCandidacyConfirmation(subitem.id, "מאושר");
+
+    const liveOrder = await getOrderById(orderId);
+    if (liveOrder) {
+      const capacityAfterAssign = getOrderCapacityStateFromMondayItem(liveOrder);
+      const desiredCandidacyStatus = getCandidacyOrderStatusFromCapacity(
+        capacityAfterAssign,
+        orderStatus
+      );
+      if (desiredCandidacyStatus !== orderStatus) {
+        await updateOrderStatus(orderId, desiredCandidacyStatus);
+      }
+    }
 
     const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
     if (webhookUrl) {

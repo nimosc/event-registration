@@ -14,6 +14,10 @@ import {
   getOrdersByIdsForInvoice,
 } from "@/lib/monday";
 import {
+  getInvoiceMonthSubmissionError,
+  parseInvoiceMonthKey,
+} from "@/lib/invoiceEligibility";
+import {
   getFollowUpAccountingDocument,
   INVOICE_SUBMISSION_STATUS,
 } from "@/lib/invoiceDocuments";
@@ -86,6 +90,17 @@ export async function POST(req: NextRequest) {
         .map((order) => parseMonthKeyFromDate(getColumnValue(order, "date_mm18mqn2")?.text || ""))
         .filter(Boolean)
     );
+    const invoiceMonthKey = parseInvoiceMonthKey(invoice.date);
+    if (invoiceMonthKey) monthKeys.add(invoiceMonthKey);
+    if (monthKeys.size === 0) {
+      return NextResponse.json({ error: "חסר חודש להגשה" }, { status: 400 });
+    }
+    for (const key of monthKeys) {
+      const monthSubmissionError = getInvoiceMonthSubmissionError(key);
+      if (monthSubmissionError) {
+        return NextResponse.json({ error: monthSubmissionError }, { status: 400 });
+      }
+    }
     if (monthKeys.size > 1) {
       return NextResponse.json(
         { error: "חשבונית מס קבלה ניתנת להגשה לחודש אחד בלבד — פנה למנהל" },

@@ -16,6 +16,7 @@ export interface Order {
   odtAssigned: number;
   roleCapacityCeiling: number;
   roleApplied: number;
+  roleApproved: number;
   roleLabel: "ODT" | "אומנים";
   artistCapacityCeiling: number;
   odtCapacityCeiling: number;
@@ -49,18 +50,18 @@ function formatDateDDMMYYYY(dateStr: string): string {
 }
 
 function SpotsBar({
-  roleLabel, applied, capacityCeiling, spotsRemaining, forceDone,
+  roleLabel, approved, required, spotsRemaining, forceDone,
 }: {
   roleLabel: "ODT" | "אומנים";
-  applied: number;
-  capacityCeiling: number;
+  approved: number;
+  required: number;
   spotsRemaining: number;
   forceDone?: boolean;
 }) {
-  if (capacityCeiling <= 0) return null;
+  if (required <= 0) return null;
   const isClosed = forceDone || spotsRemaining <= 0;
-  const isAlmostFull = !isClosed && capacityCeiling > 0 && (applied / capacityCeiling) >= 0.75;
-  const percent = Math.min(100, (applied / capacityCeiling) * 100);
+  const isAlmostFull = !isClosed && required > 0 && (approved / required) >= 0.75;
+  const percent = Math.min(100, (approved / required) * 100);
   const barColor =
     roleLabel === "ODT"
       ? isClosed
@@ -80,8 +81,8 @@ function SpotsBar({
         <span className="font-semibold text-gray-700">
           <span className={roleLabel === "ODT" ? "text-violet-700" : "text-blue-700"}>{roleLabel}</span>
           {": "}
-          <span className="text-gray-900">{applied} / {capacityCeiling}</span>
-          <span className="text-gray-400 font-normal"> נרשמו</span>
+          <span className="text-gray-900">{approved} / {required}</span>
+          <span className="text-gray-400 font-normal"> מאושרים</span>
         </span>
         <span className={`font-medium text-left ${isClosed ? "text-red-500" : isAlmostFull ? "text-orange-400" : "text-emerald-600"}`}>
           {isClosed
@@ -225,8 +226,8 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
         {/* Spots bar */}
         <SpotsBar
           roleLabel={order.roleLabel}
-          applied={order.roleApplied}
-          capacityCeiling={order.roleCapacityCeiling}
+          approved={order.roleApproved}
+          required={order.roleCapacityCeiling}
           spotsRemaining={order.spotsRemaining}
           forceDone={isAssignmentDone}
         />

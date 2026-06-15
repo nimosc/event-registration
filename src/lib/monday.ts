@@ -521,8 +521,8 @@ export type RegistrationRole = "אומן" | "ODT";
 
 export interface RoleCapacityState {
   required: number;
-  assigned: number;
-  capacityLimit: number;
+  /** מספר מועמדויות מאושרות לתפקיד */
+  approved: number;
   isClosed: boolean;
 }
 
@@ -531,30 +531,61 @@ export interface OrderCapacityState {
   odt: RoleCapacityState;
 }
 
-function toCapacityLimit(required: number): number {
-  return required > 0 ? Math.ceil(required * 1.5) : 0;
+export function isOdtSubitemArtistType(artistType: string | undefined): boolean {
+  return (artistType || "").trim() === "ODT";
 }
 
-export function getRoleCapacityState(required: number, assigned: number): RoleCapacityState {
-  const capacityLimit = toCapacityLimit(required);
+export function countApprovedCandidaciesForRole(
+  subitems: Array<{ candidacyStatus: string; artistType?: string }>,
+  role: RegistrationRole
+): number {
+  return subitems.filter((sub) => {
+    const isOdt = isOdtSubitemArtistType(sub.artistType);
+    if (role === "ODT" ? !isOdt : isOdt) return false;
+    return sub.candidacyStatus === "מאושר";
+  }).length;
+}
+
+export function getApprovedCountsFromMondaySubitems(
+  subitems: Array<{ column_values: MondayColumnValue[] }>
+): { artist: number; odt: number } {
+  let artist = 0;
+  let odt = 0;
+  for (const sub of subitems) {
+    const candidacyCol = sub.column_values.find((cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID);
+    const artistTypeCol = sub.column_values.find((cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID);
+    if (mapMondayCandidacyToInternal(candidacyCol?.text || "") !== "מאושר") continue;
+    if ((artistTypeCol?.text || "").trim() === "ODT") odt++;
+    else artist++;
+  }
+  return { artist, odt };
+}
+
+export function getRoleCapacityState(required: number, approved: number): RoleCapacityState {
   return {
     required,
-    assigned,
-    capacityLimit,
-    isClosed: capacityLimit > 0 && assigned >= capacityLimit,
+    approved,
+    isClosed: required > 0 && approved >= required,
   };
 }
 
 export function getOrderCapacityState(
   requiredArtist: number,
-  assignedArtist: number,
+  approvedArtist: number,
   requiredOdt: number,
-  assignedOdt: number
+  approvedOdt: number
 ): OrderCapacityState {
   return {
-    artist: getRoleCapacityState(requiredArtist, assignedArtist),
-    odt: getRoleCapacityState(requiredOdt, assignedOdt),
+    artist: getRoleCapacityState(requiredArtist, approvedArtist),
+    odt: getRoleCapacityState(requiredOdt, approvedOdt),
   };
+}
+
+export function getOrderCapacityStateFromMondayItem(item: MondayItem): OrderCapacityState {
+  const requiredArtist = parseFloat(getColumnValue(item, ARTIST_REQUIRED_COLUMN_ID)?.text || "0") || 0;
+  const requiredOdt = parseFloat(getColumnValue(item, ODT_REQUIRED_COLUMN_ID)?.text || "0") || 0;
+  const approved = getApprovedCountsFromMondaySubitems(item.subitems || []);
+  return getOrderCapacityState(requiredArtist, approved.artist, requiredOdt, approved.odt);
 }
 
 export function isRegistrationOpenForRole(
@@ -562,15 +593,15 @@ export function isRegistrationOpenForRole(
   capacity: OrderCapacityState
 ): boolean {
   const state = role === "ODT" ? capacity.odt : capacity.artist;
-  if (state.capacityLimit <= 0) return false;
+  if (state.required <= 0) return false;
   return !state.isClosed;
 }
 
 export function areAllRelevantRolesAtCapacity(
   capacity: OrderCapacityState
 ): boolean {
-  const artistRelevant = capacity.artist.capacityLimit > 0;
-  const odtRelevant = capacity.odt.capacityLimit > 0;
+  const artistRelevant = capacity.artist.required > 0;
+  const odtRelevant = capacity.odt.required > 0;
   if (!artistRelevant && !odtRelevant) return false;
   return (
     (!artistRelevant || capacity.artist.isClosed) &&
@@ -701,7 +732,7 @@ export async function getOpenOrders() {
             subitems {
               id
               name
-              column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}"]) {
+              column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "${SUBITEM_ARTIST_TYPE_COLUMN_ID}"]) {
                 ${MONDAY_COLUMN_VALUE_FIELDS}
               }
             }
@@ -1272,13 +1303,13 @@ export async function getOrderById(orderId: string) {
     query {
       items(ids: [${orderId}]) {
         id
-        column_values(ids: ["color_mm18ej76", "numeric_mm185aw7"]) {
+        column_values(ids: ["color_mm18ej76", "${ARTIST_REQUIRED_COLUMN_ID}", "${ODT_REQUIRED_COLUMN_ID}"]) {
           id
           text
         }
         subitems {
           id
-          column_values(ids: ["color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}"]) {
+          column_values(ids: ["color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "${SUBITEM_ARTIST_TYPE_COLUMN_ID}"]) {
             id
             text
           }

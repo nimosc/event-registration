@@ -4,12 +4,11 @@ import {
   updateCandidacyConfirmation,
   getOrderAdminSnapshotById,
   getOrderById,
-  getColumnValue,
   getArtistByIdBasic,
   getCandidacyDateConflictForSubitem,
   updateOrderStatus,
-  getOrderCapacityState,
   getCandidacyOrderStatusFromCapacity,
+  getOrderCapacityStateFromMondayItem,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
@@ -69,20 +68,7 @@ export async function PATCH(request: NextRequest) {
 
         const liveOrder = await getOrderById(orderId);
         if (liveOrder) {
-          const requiredCol = getColumnValue(liveOrder, "numeric_mm185aw7");
-          const requiredOdtCol = getColumnValue(liveOrder, "numeric_mm387qc7");
-          const artistAssignedCol = getColumnValue(liveOrder, "numeric_mm18d914");
-          const odtAssignedCol = getColumnValue(liveOrder, "numeric_mm3b6rnr");
-          const requiredArtist = parseFloat(requiredCol?.text || "0") || 0;
-          const requiredOdt = parseFloat(requiredOdtCol?.text || "0") || 0;
-          const assignedArtist = parseFloat(artistAssignedCol?.text || "0") || 0;
-          const assignedOdt = parseFloat(odtAssignedCol?.text || "0") || 0;
-          const capacity = getOrderCapacityState(
-            requiredArtist,
-            assignedArtist,
-            requiredOdt,
-            assignedOdt
-          );
+          const capacity = getOrderCapacityStateFromMondayItem(liveOrder);
           const desiredStatus = getCandidacyOrderStatusFromCapacity(capacity, currentStatus);
           if (desiredStatus !== currentStatus) {
             await updateOrderStatus(orderId, desiredStatus);

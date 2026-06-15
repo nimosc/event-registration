@@ -3,7 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import NavBar from "@/components/NavBar";
 import { SessionUser } from "@/lib/auth";
-import { canSubmitInvoice, isInvoiceStatusEligible } from "@/lib/invoiceEligibility";
+import {
+  canSubmitInvoice,
+  getInvoiceMonthSubmissionError,
+  getLatestClosedMonthKey,
+  isInvoiceMonthClosedForSubmission,
+  isInvoiceStatusEligible,
+  INVOICE_MONTH_NOT_CLOSED_ERROR,
+  parseInvoiceMonthKey,
+} from "@/lib/invoiceEligibility";
 import {
   getFollowUpAccountingDocument,
   getInitialDocumentForTaxStatus,
@@ -183,7 +191,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthKey());
+  const [selectedMonth, setSelectedMonth] = useState<string>(getLatestClosedMonthKey());
   const [artistStatus, setArtistStatus] = useState<"מורשה" | "פטור" | "">("");
   const needsTaxStatusPrompt = !loading && !artistStatus;
   const initialDocumentConfig = artistStatus
@@ -344,6 +352,8 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     if (selectedMonth === "all") return eligibleByStatus;
     return eligibleByStatus.filter((r) => parseMonthKey(r.date) === selectedMonth);
   }, [eligibleByStatus, selectedMonth]);
+  const canSubmitForSelectedMonth =
+    selectedMonth !== "all" && isInvoiceMonthClosedForSubmission(selectedMonth);
   const approvedAttendanceCount = filtered.filter((r) => r.attendanceStatus === "מאושר").length;
   const pendingAttendanceCount = filtered.filter((r) => !r.attendanceStatus).length;
   const pendingAccountingInvoices = useMemo(
@@ -378,7 +388,10 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   const awaitingAccountingCount = filtered.filter((r) => isRegistrationAwaitingAccounting(r, invoices)).length;
   const readyToSubmitCount = filtered.filter((r) => canSubmitInvoice(r)).length;
   const showVoluntaryUpload =
-    selectedMonth !== "all" && Boolean(artistStatus) && filtered.length === 0;
+    selectedMonth !== "all" &&
+    Boolean(artistStatus) &&
+    filtered.length === 0 &&
+    canSubmitForSelectedMonth;
   const voluntaryDocumentLabel =
     artistStatus === "מורשה" ? "בקשת תשלום" : "קבלה";
 
@@ -519,6 +532,13 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   ]);
 
   const handleSubmitAccountingDocument = useCallback(async () => {
+    const monthError = getInvoiceMonthSubmissionError(
+      accountingInvoice ? parseInvoiceMonthKey(accountingInvoice.date) : ""
+    );
+    if (monthError) {
+      setError(monthError);
+      return;
+    }
     if (!accountingInvoiceId || !accountingFile) {
       setError("חובה לצרף חשבונית מס קבלה");
       return;
@@ -568,6 +588,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     }
   }, [
     accountingFile,
+    accountingInvoice,
     accountingInvoiceId,
     accountingInvoiceNumber,
     accountingValidationError,
@@ -591,6 +612,11 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, [artistBankDetails]);
 
   const handleSubmitVoluntaryInvoice = useCallback(async () => {
+    const monthError = getInvoiceMonthSubmissionError(selectedMonth);
+    if (monthError) {
+      setError(monthError);
+      return;
+    }
     if (!eventsDescription.trim()) {
       setError("יש לפרט עבור אילו אירועים מדובר");
       return;
@@ -689,6 +715,11 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     monthLabel: string,
     monthKey: string
   ) => {
+    const monthError = getInvoiceMonthSubmissionError(monthKey);
+    if (monthError) {
+      setError(monthError);
+      return;
+    }
     if (!orderIds.length || !subitemIds.length) {
       setError("יש לבחור לפחות אירוע אחד");
       return;
@@ -885,9 +916,12 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
               </div>
             </div>
             <ul className="mt-4 space-y-2 text-sm text-amber-900">
-              {pendingAccountingInvoices.map((inv) => (
+              {pendingAccountingInvoices.map((inv) => {
+                const invMonthClosed = isInvoiceMonthClosedForSubmission(parseInvoiceMonthKey(inv.date));
+                return (
                 <li key={inv.id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-white/70 px-3 py-2">
                   <span>{inv.name}</span>
+                  {invMonthClosed ? (
                   <button
                     type="button"
                     className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
@@ -895,8 +929,11 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   >
                     העלה חשבונית מס קבלה
                   </button>
+                  ) : (
+                    <span className="text-xs text-amber-700">{INVOICE_MONTH_NOT_CLOSED_ERROR}</span>
+                  )}
                 </li>
-              ))}
+              )})}
             </ul>
           </div>
         )}
@@ -929,7 +966,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 </button>
               ))}
               </div>
-              {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length > 0 && pendingAccountingInvoiceIdForSelectedMonth && (
+              {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length > 0 && pendingAccountingInvoiceIdForSelectedMonth && canSubmitForSelectedMonth && (
                 <button
                   type="button"
                   onClick={() => {
@@ -945,7 +982,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   העלה חשבונית מס קבלה לחודש
                 </button>
               )}
-              {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length === 0 && readyToSubmitCount > 0 && (
+              {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length === 0 && readyToSubmitCount > 0 && canSubmitForSelectedMonth && (
                 <button
                   type="button"
                   onClick={() => {
@@ -983,6 +1020,11 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 </button>
               )}
             </div>
+            {selectedMonth !== "all" && !canSubmitForSelectedMonth && (
+              <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                {INVOICE_MONTH_NOT_CLOSED_ERROR}
+              </p>
+            )}
           </div>
         )}
 
@@ -1070,7 +1112,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 max-w-xs text-right leading-snug">
                                 {getSubitemInvoiceStatusDisplay(SUBITEM_INVOICE_STATUS.PAYMENT_REQUEST)}
                               </span>
-                              {(accountingInvoiceId || reg.linkedInvoiceId) && (
+                              {canSubmitForSelectedMonth && (accountingInvoiceId || reg.linkedInvoiceId) && (
                                 <button
                                   type="button"
                                   className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"

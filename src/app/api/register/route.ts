@@ -13,6 +13,7 @@ import {
   getOrderCapacityState,
   isRegistrationOpenForRole,
   getCandidacyOrderStatusFromCapacity,
+  getApprovedCountsFromMondaySubitems,
 } from "@/lib/monday";
 import { getSession } from "@/lib/auth";
 
@@ -76,16 +77,14 @@ export async function POST(request: NextRequest) {
 
     const myAssigned = isOdt ? odtAssigned : artistAssigned;
     const myAssignedColumnId = isOdt ? "numeric_mm3b6rnr" : "numeric_mm18d914";
+    const approved = getApprovedCountsFromMondaySubitems(order.subitems || []);
     const capacity = getOrderCapacityState(
       requiredCount,
-      artistAssigned,
+      approved.artist,
       requiredOdtCount,
-      odtAssigned
+      approved.odt
     );
     const roleForCapacity = isOdt ? "ODT" : "אומן";
-    const myCapacityLimit = isOdt
-      ? capacity.odt.capacityLimit
-      : capacity.artist.capacityLimit;
 
     if (!isRegistrationOpenForRole(roleForCapacity, capacity)) {
       return NextResponse.json(
@@ -112,13 +111,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (myCapacityLimit > 0 && myAssigned >= myCapacityLimit) {
-      return NextResponse.json(
-        { error: "נסגרה קבלת מועמדויות להזמנה זו" },
-        { status: 400 }
-      );
-    }
-
     // Create subitem
     const subitem = await createSubitem(
       orderId,
@@ -131,13 +123,11 @@ export async function POST(request: NextRequest) {
     const newAssigned = myAssigned + 1;
     await updateAssignedCount(orderId, newAssigned, myAssignedColumnId);
 
-    const newArtistAssigned = isOdt ? artistAssigned : newAssigned;
-    const newOdtAssigned = isOdt ? newAssigned : odtAssigned;
     const capacityAfterCreate = getOrderCapacityState(
       requiredCount,
-      newArtistAssigned,
+      approved.artist,
       requiredOdtCount,
-      newOdtAssigned
+      approved.odt
     );
     const desiredStatus = getCandidacyOrderStatusFromCapacity(capacityAfterCreate, status);
     if (desiredStatus !== status) {
@@ -215,24 +205,16 @@ export async function DELETE(request: NextRequest) {
     const status = statusCol?.text || "";
     const requiredCol = getColumnValue(order, "numeric_mm185aw7");
     const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
-    const artistAssignedCol = getColumnValue(order, "numeric_mm18d914");
-    const odtAssignedCol = getColumnValue(order, "numeric_mm3b6rnr");
     const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
     const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
-    const artistAssigned = parseFloat(artistAssignedCol?.text || "0") || 0;
-    const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
 
-    const newArtistAssigned = session.role === "ODT"
-      ? artistAssigned
-      : Math.max(0, artistAssigned - 1);
-    const newOdtAssigned = session.role === "ODT"
-      ? Math.max(0, odtAssigned - 1)
-      : odtAssigned;
+    const remainingSubitems = (order.subitems || []).filter((sub) => sub.id !== subitemId);
+    const approved = getApprovedCountsFromMondaySubitems(remainingSubitems);
     const capacityAfterDelete = getOrderCapacityState(
       requiredCount,
-      newArtistAssigned,
+      approved.artist,
       requiredOdtCount,
-      newOdtAssigned
+      approved.odt
     );
     const desiredStatus = getCandidacyOrderStatusFromCapacity(capacityAfterDelete, status);
     if (desiredStatus !== status) {

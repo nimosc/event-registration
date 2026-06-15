@@ -19,6 +19,8 @@ import {
   getOrderCapacityState,
   isRegistrationOpenForRole,
   getCandidacyOrderStatusFromCapacity,
+  countApprovedCandidaciesForRole,
+  SUBITEM_ARTIST_TYPE_COLUMN_ID,
 } from "@/lib/monday";
 import { getSession, createSession, setSessionCookie } from "@/lib/auth";
 
@@ -35,10 +37,12 @@ export interface OrderData {
   assignedCount: number;
   odtRequired: number;
   odtAssigned: number;
-  /** מכסת התפקיד של המשתמש המחובר (תקרה 150%) */
+  /** דרישת התפקיד של המשתמש המחובר */
   roleCapacityCeiling: number;
   /** כמה נרשמו לתפקיד של המשתמש המחובר */
   roleApplied: number;
+  /** כמה מאושרים לתפקיד של המשתמש המחובר */
+  roleApproved: number;
   roleLabel: "ODT" | "אומנים";
   artistCapacityCeiling: number;
   odtCapacityCeiling: number;
@@ -56,6 +60,7 @@ export interface SubitemData {
   linkedArtistIds: number[];
   attendanceStatus: string;
   candidacyStatus: string;
+  artistType: string;
 }
 
 export async function GET() {
@@ -100,14 +105,6 @@ export async function GET() {
         const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
         const odtRequired = parseFloat(odtRequiredCol?.text || "0") || 0;
         const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
-        const capacity = getOrderCapacityState(
-          requiredCount,
-          assignedCount,
-          odtRequired,
-          odtAssigned
-        );
-        const artistCapacity = capacity.artist.capacityLimit;
-        const odtCapacity = capacity.odt.capacityLimit;
 
         const subitems: SubitemData[] = (item.subitems || []).map((sub) => {
           const relationCol = sub.column_values.find(
@@ -119,6 +116,9 @@ export async function GET() {
           const candidacyCol = sub.column_values.find(
             (cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID
           );
+          const artistTypeCol = sub.column_values.find(
+            (cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID
+          );
 
           return {
             id: sub.id,
@@ -126,8 +126,20 @@ export async function GET() {
             linkedArtistIds: parseLinkedItemIds(relationCol?.value),
             attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
             candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
+            artistType: (artistTypeCol?.text || "").trim(),
           };
         });
+
+        const approvedArtist = countApprovedCandidaciesForRole(subitems, "אומן");
+        const approvedOdt = countApprovedCandidaciesForRole(subitems, "ODT");
+        const capacity = getOrderCapacityState(
+          requiredCount,
+          approvedArtist,
+          odtRequired,
+          approvedOdt
+        );
+        const artistCapacity = capacity.artist.required;
+        const odtCapacity = capacity.odt.required;
 
         const mySubitem = subitems.find((sub) =>
           sub.linkedArtistIds.includes(artistId) ||
@@ -140,8 +152,9 @@ export async function GET() {
         const registrationRole = session.role === "ODT" ? "ODT" : "אומן";
         const isOdt = session.role === "ODT";
         const roleState = isOdt ? capacity.odt : capacity.artist;
-        const roleCapacityCeiling = roleState.capacityLimit;
-        const roleApplied = roleState.assigned;
+        const roleCapacityCeiling = roleState.required;
+        const roleApproved = roleState.approved;
+        const roleApplied = isOdt ? odtAssigned : assignedCount;
 
         return {
           id: item.id,
@@ -157,6 +170,7 @@ export async function GET() {
           odtAssigned,
           roleCapacityCeiling,
           roleApplied,
+          roleApproved,
           roleLabel: (isOdt ? "ODT" : "אומנים") as "ODT" | "אומנים",
           artistCapacityCeiling: artistCapacity,
           odtCapacityCeiling: odtCapacity,
@@ -165,7 +179,7 @@ export async function GET() {
             isRegistrationOpenForRole(registrationRole, capacity),
           spotsRemaining:
             roleCapacityCeiling > 0
-              ? Math.max(0, roleCapacityCeiling - roleApplied)
+              ? Math.max(0, roleCapacityCeiling - roleApproved)
               : 999,
           isRegistered: !!mySubitem,
           subitemId: mySubitem?.id,

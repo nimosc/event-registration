@@ -283,7 +283,6 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       if (o.id !== orderId) return o;
       const isOdt = user.role === "ODT";
       const newRoleApplied = o.roleApplied + 1;
-      const newSpotsRemaining = Math.max(0, o.spotsRemaining - 1);
       return {
         ...o,
         isRegistered: true,
@@ -291,8 +290,6 @@ export default function OrdersClient({ user }: OrdersClientProps) {
         assignedCount: isOdt ? o.assignedCount : o.assignedCount + 1,
         odtAssigned: isOdt ? o.odtAssigned + 1 : o.odtAssigned,
         roleApplied: newRoleApplied,
-        spotsRemaining: newSpotsRemaining,
-        isRoleOpen: o.roleCapacityCeiling > 0 && newRoleApplied < o.roleCapacityCeiling,
       };
     }));
   }
