@@ -64,11 +64,18 @@ function isOdtType(artistType: string | undefined): boolean {
   return (artistType || "").trim() === "ODT";
 }
 
+function subitemMatchesRole(
+  sub: AdminOrder["subitems"][number],
+  role: "אומן" | "ODT"
+): boolean {
+  return isOdtType(sub.artistType) === (role === "ODT");
+}
+
 function countRegisteredByRole(
   subitems: AdminOrder["subitems"],
   role: "אומן" | "ODT"
 ): number {
-  return subitems.filter((s) => isOdtType(s.artistType) === (role === "ODT")).length;
+  return subitems.filter((s) => subitemMatchesRole(s, role)).length;
 }
 
 function countApprovedByRole(
@@ -77,51 +84,152 @@ function countApprovedByRole(
   mode: "candidacy" | "arrival"
 ): number {
   return subitems.filter((s) => {
-    if (isOdtType(s.artistType) !== (role === "ODT")) return false;
+    if (!subitemMatchesRole(s, role)) return false;
     if (mode === "arrival") return s.attendanceStatus === "מאושר";
     return (s.candidacyStatus ?? "") === "מאושר";
   }).length;
 }
 
+function countPendingByRole(
+  subitems: AdminOrder["subitems"],
+  role: "אומן" | "ODT" | null,
+  mode: "candidacy" | "arrival"
+): number {
+  return subitems.filter((s) => {
+    if (role && !subitemMatchesRole(s, role)) return false;
+    if (mode === "arrival") {
+      return (
+        isCandidacyApproved(s.candidacyStatus) &&
+        s.attendanceStatus !== "מאושר" &&
+        s.attendanceStatus !== "נדחה"
+      );
+    }
+    return (
+      (s.candidacyStatus ?? "") !== "מאושר" &&
+      (s.candidacyStatus ?? "") !== "נדחה" &&
+      !s.hasCandidacyDateConflict
+    );
+  }).length;
+}
+
+function countBlockedByRole(
+  subitems: AdminOrder["subitems"],
+  role: "אומן" | "ODT" | null,
+  mode: "candidacy" | "arrival"
+): number {
+  if (mode !== "candidacy") return 0;
+  return subitems.filter((s) => {
+    if (role && !subitemMatchesRole(s, role)) return false;
+    return (s.candidacyStatus ?? "") !== "מאושר" && Boolean(s.hasCandidacyDateConflict);
+  }).length;
+}
+
+type CategoryView = "all" | "artist" | "odt";
+
+function CategoryViewTabs({
+  value,
+  onChange,
+}: {
+  value: CategoryView;
+  onChange: (value: CategoryView) => void;
+}) {
+  const options: { value: CategoryView; label: string }[] = [
+    { value: "all", label: "הכל" },
+    { value: "artist", label: "אומנים" },
+    { value: "odt", label: "ODT" },
+  ];
+
+  return (
+    <div
+      className="inline-flex p-0.5 bg-gray-100 rounded-lg gap-0.5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange(option.value);
+          }}
+          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+            value === option.value
+              ? "bg-white text-gray-900 shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function StatChip({
+  label,
+  value,
+  emphasize,
+}: {
+  label: string;
+  value: number;
+  emphasize?: "approved" | "default";
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 text-gray-600">
+      <span>{label}</span>
+      <span
+        className={`font-semibold tabular-nums ${
+          emphasize === "approved" ? "text-emerald-700" : "text-gray-900"
+        }`}
+      >
+        {value}
+      </span>
+    </span>
+  );
+}
+
 function AdminRoleProgress({
   roleLabel,
   required,
-  registered,
+  applied,
   approved,
   variant,
 }: {
   roleLabel: string;
   required: number;
-  registered: number;
+  applied: number;
   approved: number;
   variant: "artist" | "odt";
 }) {
   if (required <= 0) return null;
   const percent = Math.min(100, (approved / required) * 100);
-  const isFull = approved >= required;
+  const surplus = Math.max(0, approved - required);
   const barColor =
     variant === "odt"
-      ? isFull
+      ? approved >= required
         ? "bg-green-400"
         : "bg-violet-400"
-      : isFull
+      : approved >= required
         ? "bg-green-400"
         : "bg-blue-400";
 
   return (
     <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span className={`font-semibold ${variant === "odt" ? "text-purple-700" : "text-blue-700"}`}>
           {roleLabel}
         </span>
-        <span className="text-gray-600">
-          <span className="font-semibold text-gray-800">{registered}</span> נרשמו
-        </span>
-        <span className="text-gray-600">
-          <span className={`font-semibold ${isFull ? "text-green-700" : "text-emerald-700"}`}>{approved}</span>
-          {" / "}
-          {required} מאושרים
-        </span>
+        <span className="text-gray-300">·</span>
+        <StatChip label="נדרש" value={required} />
+        <span className="text-gray-300">·</span>
+        <StatChip label="הגישו מועמדות" value={applied} />
+        <span className="text-gray-300">·</span>
+        <StatChip label="אושרו" value={approved} emphasize="approved" />
+        {surplus > 0 && (
+          <span className="text-[10px] font-medium text-green-700 px-1.5 py-0.5 bg-green-50 rounded-full border border-green-200">
+            +{surplus} מעבר לנדרש
+          </span>
+        )}
       </div>
       <div className="w-full bg-gray-100 rounded-full h-1.5">
         <div
@@ -130,6 +238,53 @@ function AdminRoleProgress({
         />
       </div>
     </div>
+  );
+}
+
+function CategoryCompareSummary({
+  artist,
+  odt,
+}: {
+  artist: { required: number; applied: number; approved: number };
+  odt: { required: number; applied: number; approved: number };
+}) {
+  const parts: string[] = [];
+
+  if (artist.required > 0) {
+    const pct = Math.round((artist.approved / artist.required) * 100);
+    parts.push(`אומנים: ${pct}% אישור (${artist.approved}/${artist.required})`);
+  }
+  if (odt.required > 0) {
+    const pct = Math.round((odt.approved / odt.required) * 100);
+    parts.push(`ODT: ${pct}% אישור (${odt.approved}/${odt.required})`);
+  }
+
+  if (parts.length === 0) return null;
+
+  const artistGap =
+    artist.required > 0 ? Math.max(0, artist.required - artist.approved) : 0;
+  const odtGap = odt.required > 0 ? Math.max(0, odt.required - odt.approved) : 0;
+  const artistRatio = artist.required > 0 ? artist.approved / artist.required : 1;
+  const odtRatio = odt.required > 0 ? odt.approved / odt.required : 1;
+
+  let behindLabel = "";
+  if (artist.required > 0 && odt.required > 0) {
+    if (artistRatio < odtRatio) {
+      behindLabel = `אומנים מאחור ב-${artistGap} מאושרים`;
+    } else if (odtRatio < artistRatio) {
+      behindLabel = `ODT מאחור ב-${odtGap} מאושרים`;
+    } else if (artistGap > odtGap) {
+      behindLabel = `אומנים מאחור ב-${artistGap} מאושרים`;
+    } else if (odtGap > artistGap) {
+      behindLabel = `ODT מאחור ב-${odtGap} מאושרים`;
+    }
+  }
+
+  return (
+    <p className="text-[11px] text-gray-500 leading-snug">
+      {parts.join(" · ")}
+      {behindLabel ? ` · ${behindLabel}` : ""}
+    </p>
   );
 }
 
@@ -433,6 +588,7 @@ function OrderAccordion({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [categoryView, setCategoryView] = useState<CategoryView>("all");
   const titleParts = [order.location, formatDateDDMMYYYY(order.date)].filter(Boolean);
   const orderTitle = titleParts.length > 0 ? titleParts.join(" | ") : order.name;
 
@@ -455,15 +611,15 @@ function OrderAccordion({
       if (order.activityHours) ws_data.push(["שעות פעילות", order.activityHours]);
       ws_data.push(["סטטוס", order.status]);
       ws_data.push(["אומנים נדרשים", order.requiredCount]);
-      ws_data.push(["אומנים נרשמו", order.assignedCount]);
+      ws_data.push(["אומנים הגישו מועמדות", order.assignedCount]);
       ws_data.push([
-        "אומנים מאושרים",
+        "אומנים אושרו",
         countApprovedByRole(order.subitems, "אומן", statusMode),
       ]);
       ws_data.push(["ODT נדרשים", order.requiredOdtCount]);
-      ws_data.push(["ODT נרשמו", order.odtRegisteredCount]);
+      ws_data.push(["ODT הגישו מועמדות", order.odtRegisteredCount]);
       ws_data.push([
-        "ODT מאושרים",
+        "ODT אושרו",
         countApprovedByRole(order.subitems, "ODT", statusMode),
       ]);
       ws_data.push([]);
@@ -500,32 +656,25 @@ function OrderAccordion({
       candidacyDateConflictMessage: sub.candidacyDateConflictMessage,
     }));
 
-  const artistRegistered = countRegisteredByRole(order.subitems, "אומן");
-  const odtRegistered = countRegisteredByRole(order.subitems, "ODT");
+  const artistApplied = countRegisteredByRole(order.subitems, "אומן");
+  const odtApplied = countRegisteredByRole(order.subitems, "ODT");
   const artistApproved = countApprovedByRole(order.subitems, "אומן", statusMode);
   const odtApproved = countApprovedByRole(order.subitems, "ODT", statusMode);
 
-  const pendingCount =
-    statusMode === "arrival"
-      ? order.subitems.filter(
-          (s) =>
-            isCandidacyApproved(s.candidacyStatus) &&
-            s.attendanceStatus !== "מאושר" &&
-            s.attendanceStatus !== "נדחה"
-        ).length
-      : order.subitems.filter(
-          (s) =>
-            (s.candidacyStatus ?? "") !== "מאושר" &&
-            (s.candidacyStatus ?? "") !== "נדחה" &&
-            !s.hasCandidacyDateConflict
-        ).length;
+  const badgeRole: "אומן" | "ODT" | null =
+    categoryView === "artist" ? "אומן" : categoryView === "odt" ? "ODT" : null;
 
-  const blockedByDateConflictCount =
-    statusMode === "candidacy"
-      ? order.subitems.filter((s) => (s.candidacyStatus ?? "") !== "מאושר" && Boolean(s.hasCandidacyDateConflict)).length
-      : 0;
+  const pendingCount = countPendingByRole(order.subitems, badgeRole, statusMode);
+  const blockedByDateConflictCount = countBlockedByRole(
+    order.subitems,
+    badgeRole,
+    statusMode
+  );
 
-  const candidateTargetCount = pendingCount + blockedByDateConflictCount;
+  const showArtistRow =
+    order.requiredCount > 0 && (categoryView === "all" || categoryView === "artist");
+  const showOdtRow =
+    order.requiredOdtCount > 0 && (categoryView === "all" || categoryView === "odt");
 
   return (
     <div className={`bg-white rounded-xl overflow-hidden transition-colors ${
@@ -618,21 +767,42 @@ function OrderAccordion({
 
             {/* Progress */}
             {(order.requiredCount > 0 || order.requiredOdtCount > 0) && (
-              <div className="space-y-3">
-                <AdminRoleProgress
-                  roleLabel="אומנים"
-                  required={order.requiredCount}
-                  registered={artistRegistered}
-                  approved={artistApproved}
-                  variant="artist"
-                />
-                <AdminRoleProgress
-                  roleLabel="ODT"
-                  required={order.requiredOdtCount}
-                  registered={odtRegistered}
-                  approved={odtApproved}
-                  variant="odt"
-                />
+              <div className="space-y-2.5" onClick={(e) => e.stopPropagation()}>
+                <CategoryViewTabs value={categoryView} onChange={setCategoryView} />
+                <div className="space-y-3">
+                  {showArtistRow && (
+                    <AdminRoleProgress
+                      roleLabel="אומנים"
+                      required={order.requiredCount}
+                      applied={artistApplied}
+                      approved={artistApproved}
+                      variant="artist"
+                    />
+                  )}
+                  {showOdtRow && (
+                    <AdminRoleProgress
+                      roleLabel="ODT"
+                      required={order.requiredOdtCount}
+                      applied={odtApplied}
+                      approved={odtApproved}
+                      variant="odt"
+                    />
+                  )}
+                </div>
+                {categoryView === "all" && (
+                  <CategoryCompareSummary
+                    artist={{
+                      required: order.requiredCount,
+                      applied: artistApplied,
+                      approved: artistApproved,
+                    }}
+                    odt={{
+                      required: order.requiredOdtCount,
+                      applied: odtApplied,
+                      approved: odtApproved,
+                    }}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -655,9 +825,6 @@ function OrderAccordion({
               )}
               אקסל
             </button>
-            <span className="text-xs text-gray-500 flex items-center gap-1">
-              {candidateTargetCount} מועמדים צריך
-            </span>
             <svg
               className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
                 expanded ? "rotate-180" : ""

@@ -19,7 +19,8 @@ import {
   isRegistrationOpenForRole,
   countApprovedCandidaciesForRole,
   getRegisteredCountsFromMondaySubitems,
-  SUBITEM_ARTIST_TYPE_COLUMN_ID,
+  getSubitemRegistrationRoleFromMondayColumns,
+  registrationRoleToArtistType,
 } from "@/lib/monday";
 import { getSession, createSession, setSessionCookie } from "@/lib/auth";
 
@@ -111,9 +112,7 @@ export async function GET() {
           const candidacyCol = sub.column_values.find(
             (cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID
           );
-          const artistTypeCol = sub.column_values.find(
-            (cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID
-          );
+          const registrationRole = getSubitemRegistrationRoleFromMondayColumns(sub.column_values);
 
           return {
             id: sub.id,
@@ -121,7 +120,7 @@ export async function GET() {
             linkedArtistIds: parseLinkedItemIds(relationCol?.value),
             attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
             candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
-            artistType: (artistTypeCol?.text || "").trim(),
+            artistType: registrationRoleToArtistType(registrationRole),
           };
         });
 

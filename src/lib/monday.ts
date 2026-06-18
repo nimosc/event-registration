@@ -525,6 +525,8 @@ export const ARTIST_ACTIVE_STATUS_COLUMN_ID = "color_mm18wjry";
 export const ODT_REQUIRED_COLUMN_ID = "numeric_mm387qc7";
 export const ODT_ASSIGNED_COLUMN_ID = "numeric_mm3b6rnr";
 export const SUBITEM_ARTIST_TYPE_COLUMN_ID = "color_mm3bjfvg";
+/** תפקיד על subitem — אומן / ODT */
+export const SUBITEM_ROLE_COLUMN_ID = "color_mm18btbr";
 export const ARTIST_REQUIRED_COLUMN_ID = "numeric_mm185aw7";
 export const ARTIST_ASSIGNED_COLUMN_ID = "numeric_mm18d914";
 export const STATUS_OPEN = "בתהליך שיבוץ";
@@ -548,6 +550,32 @@ export interface OrderCapacityState {
 
 export function isOdtSubitemArtistType(artistType: string | undefined): boolean {
   return (artistType || "").trim() === "ODT";
+}
+
+/** מחזיר אומן/ODT מעמודת תפקיד על subitem, עם fallback לסוג אומן */
+export function resolveSubitemRegistrationRole(
+  roleLabel: string | null | undefined,
+  artistTypeLabel: string | null | undefined
+): RegistrationRole {
+  const role = (roleLabel ?? "").trim();
+  if (role === "ODT") return "ODT";
+  if (role === "אומן") return "אומן";
+  const artistType = (artistTypeLabel ?? "").trim();
+  if (artistType === "ODT") return "ODT";
+  return "אומן";
+}
+
+export function getSubitemRegistrationRoleFromMondayColumns(
+  column_values: MondayColumnValue[]
+): RegistrationRole {
+  const roleCol = column_values.find((cv) => cv.id === SUBITEM_ROLE_COLUMN_ID);
+  const typeCol = column_values.find((cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID);
+  return resolveSubitemRegistrationRole(roleCol?.text, typeCol?.text);
+}
+
+/** ערך artistType ל-DTO פנימי — "ODT" או "אומן" */
+export function registrationRoleToArtistType(role: RegistrationRole): string {
+  return role === "ODT" ? "ODT" : "אומן";
 }
 
 export function countApprovedCandidaciesForRole(
@@ -587,8 +615,8 @@ export function getRegisteredCountsFromMondaySubitems(
   let artist = 0;
   let odt = 0;
   for (const sub of subitems) {
-    const artistTypeCol = sub.column_values.find((cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID);
-    if ((artistTypeCol?.text || "").trim() === "ODT") odt++;
+    const role = getSubitemRegistrationRoleFromMondayColumns(sub.column_values);
+    if (role === "ODT") odt++;
     else artist++;
   }
   return { artist, odt };
@@ -601,9 +629,9 @@ export function getApprovedCountsFromMondaySubitems(
   let odt = 0;
   for (const sub of subitems) {
     const candidacyCol = sub.column_values.find((cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID);
-    const artistTypeCol = sub.column_values.find((cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID);
+    const role = getSubitemRegistrationRoleFromMondayColumns(sub.column_values);
     if (!isMondayCandidacyApproved(candidacyCol?.text)) continue;
-    if ((artistTypeCol?.text || "").trim() === "ODT") odt++;
+    if (role === "ODT") odt++;
     else artist++;
   }
   return { artist, odt };
@@ -945,7 +973,7 @@ export async function getOpenOrders() {
             subitems {
               id
               name
-              column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "${SUBITEM_ARTIST_TYPE_COLUMN_ID}"]) {
+              column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "${SUBITEM_ROLE_COLUMN_ID}", "${SUBITEM_ARTIST_TYPE_COLUMN_ID}"]) {
                 ${MONDAY_COLUMN_VALUE_FIELDS}
               }
             }
@@ -977,7 +1005,7 @@ export async function getAllOrders() {
             subitems {
               id
               name
-              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3bjfvg", "color_mm3pd8vf", "${SUBITEM_INVOICE_RELATION_COLUMN_ID}"]) {
+              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "${SUBITEM_ROLE_COLUMN_ID}", "${SUBITEM_ARTIST_TYPE_COLUMN_ID}", "color_mm3pd8vf", "${SUBITEM_INVOICE_RELATION_COLUMN_ID}"]) {
                 ${MONDAY_COLUMN_VALUE_FIELDS}
               }
             }
@@ -1216,20 +1244,25 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
     const relationCol = sub.column_values.find(
       (cv) => cv.id === "board_relation_mm18r4da"
     );
-    const roleCol = sub.column_values.find((cv) => cv.id === "dropdown_mm18519p");
+    const dropdownRoleCol = sub.column_values.find((cv) => cv.id === "dropdown_mm18519p");
     const attendanceCol = sub.column_values.find((cv) => cv.id === "color_mm18bjdk");
     const candidacyCol = sub.column_values.find(
       (cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID
     );
-    const artistTypeCol = sub.column_values.find((cv) => cv.id === "color_mm3bjfvg");
+    const subitemRoleCol = sub.column_values.find((cv) => cv.id === SUBITEM_ROLE_COLUMN_ID);
+    const artistTypeCol = sub.column_values.find((cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID);
+    const registrationRole = resolveSubitemRegistrationRole(
+      subitemRoleCol?.text,
+      artistTypeCol?.text
+    );
 
     const linkedArtistIds = getLinkedItemIdsAsNumbers(relationCol);
     return {
       id: sub.id,
       name: sub.name,
       linkedArtistIds,
-      role: roleCol?.text || "",
-      artistType: (artistTypeCol?.text || "").trim(),
+      role: dropdownRoleCol?.text || "",
+      artistType: registrationRoleToArtistType(registrationRole),
       attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
       candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
     };
@@ -1260,7 +1293,7 @@ const ADMIN_ORDER_ITEM_COLUMNS = `column_values(ids: ["date_mm18mqn2", "color_mm
           value
         }`;
 
-const ADMIN_ORDER_SUBITEM_COLUMNS = `column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3bjfvg"]) {
+const ADMIN_ORDER_SUBITEM_COLUMNS = `column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "${SUBITEM_ROLE_COLUMN_ID}", "${SUBITEM_ARTIST_TYPE_COLUMN_ID}"]) {
             id
             text
             value
