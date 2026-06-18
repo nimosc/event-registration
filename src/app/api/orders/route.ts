@@ -6,7 +6,6 @@ import {
   ORDER_LOCATION_COLUMN_ID,
   ORDER_ACTIVITY_HOURS_COLUMN_ID,
   ODT_REQUIRED_COLUMN_ID,
-  ODT_ASSIGNED_COLUMN_ID,
   STATUS_OPEN,
   STATUS_CANDIDACY_CLOSED,
   STATUS_ASSIGNMENT_DONE,
@@ -19,6 +18,7 @@ import {
   getOrderCapacityState,
   isRegistrationOpenForRole,
   countApprovedCandidaciesForRole,
+  getRegisteredCountsFromMondaySubitems,
   SUBITEM_ARTIST_TYPE_COLUMN_ID,
 } from "@/lib/monday";
 import { getSession, createSession, setSessionCookie } from "@/lib/auth";
@@ -93,17 +93,13 @@ export async function GET() {
         const statusCol = getColumnValue(item, "color_mm18ej76");
         const locationCol = getColumnValue(item, "text_mm1894y7");
         const requiredCol = getColumnValue(item, "numeric_mm185aw7");
-        const assignedCol = getColumnValue(item, "numeric_mm18d914");
         const odtRequiredCol = getColumnValue(item, ODT_REQUIRED_COLUMN_ID);
-        const odtAssignedCol = getColumnValue(item, ODT_ASSIGNED_COLUMN_ID);
         const orderLocationCol = getColumnValue(item, ORDER_LOCATION_COLUMN_ID);
         const activityHoursCol = getColumnValue(item, ORDER_ACTIVITY_HOURS_COLUMN_ID);
 
         const status = statusCol?.text || "";
         const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
-        const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
         const odtRequired = parseFloat(odtRequiredCol?.text || "0") || 0;
-        const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
 
         const subitems: SubitemData[] = (item.subitems || []).map((sub) => {
           const relationCol = sub.column_values.find(
@@ -131,6 +127,7 @@ export async function GET() {
 
         const approvedArtist = countApprovedCandidaciesForRole(subitems, "אומן");
         const approvedOdt = countApprovedCandidaciesForRole(subitems, "ODT");
+        const registered = getRegisteredCountsFromMondaySubitems(item.subitems || []);
         const capacity = getOrderCapacityState(
           requiredCount,
           approvedArtist,
@@ -152,7 +149,7 @@ export async function GET() {
         const roleState = isOdt ? capacity.odt : capacity.artist;
         const roleCapacityCeiling = roleState.required;
         const roleApproved = roleState.approved;
-        const roleApplied = isOdt ? odtAssigned : assignedCount;
+        const roleApplied = isOdt ? registered.odt : registered.artist;
 
         return {
           id: item.id,
@@ -163,9 +160,9 @@ export async function GET() {
           orderLocation,
           status,
           requiredCount,
-          assignedCount,
+          assignedCount: registered.artist,
           odtRequired,
-          odtAssigned,
+          odtAssigned: registered.odt,
           roleCapacityCeiling,
           roleApplied,
           roleApproved,

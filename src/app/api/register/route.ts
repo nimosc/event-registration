@@ -4,7 +4,6 @@ import {
   getAllOrders,
   createSubitem,
   deleteSubitem,
-  updateAssignedCount,
   getColumnValue,
   parseLinkedItemIds,
   STATUS_CANCELLED,
@@ -64,16 +63,9 @@ export async function POST(request: NextRequest) {
 
     const requiredCol = getColumnValue(order, "numeric_mm185aw7");
     const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
-    const artistAssignedCol = getColumnValue(order, "numeric_mm18d914");
-    const odtAssignedCol = getColumnValue(order, "numeric_mm3b6rnr");
 
     const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
     const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
-    const artistAssigned = parseFloat(artistAssignedCol?.text || "0") || 0;
-    const odtAssigned = parseFloat(odtAssignedCol?.text || "0") || 0;
-
-    const myAssigned = isOdt ? odtAssigned : artistAssigned;
-    const myAssignedColumnId = isOdt ? "numeric_mm3b6rnr" : "numeric_mm18d914";
     const approved = getApprovedCountsFromMondaySubitems(order.subitems || []);
     const capacity = getOrderCapacityState(
       requiredCount,
@@ -115,10 +107,6 @@ export async function POST(request: NextRequest) {
       session.id,
       isOdt ? "ODT" : undefined
     );
-
-    // Update per-role assigned count
-    const newAssigned = myAssigned + 1;
-    await updateAssignedCount(orderId, newAssigned, myAssignedColumnId);
 
     return NextResponse.json({
       success: true,
@@ -176,16 +164,8 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const deleteAssignedColumnId = session.role === "ODT" ? "numeric_mm3b6rnr" : "numeric_mm18d914";
-    const assignedCol = getColumnValue(order, deleteAssignedColumnId);
-    const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
-
     // Delete subitem
     await deleteSubitem(subitemId);
-
-    // Update assigned count
-    const newAssignedCount = Math.max(0, assignedCount - 1);
-    await updateAssignedCount(orderId, newAssignedCount, deleteAssignedColumnId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

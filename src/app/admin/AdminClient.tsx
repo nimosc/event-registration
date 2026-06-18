@@ -38,7 +38,10 @@ interface AdminOrder {
   status: string;
   requiredCount: number;
   requiredOdtCount: number;
+  /** אומנים שנרשמו (מ-subitems) */
   assignedCount: number;
+  /** ODT שנרשמו (מ-subitems) */
+  odtRegisteredCount: number;
   spotsRemaining: number;
   subitems: {
     id: string;
@@ -55,6 +58,79 @@ interface AdminOrder {
 
 interface AdminClientProps {
   user: SessionUser;
+}
+
+function isOdtType(artistType: string | undefined): boolean {
+  return (artistType || "").trim() === "ODT";
+}
+
+function countRegisteredByRole(
+  subitems: AdminOrder["subitems"],
+  role: "אומן" | "ODT"
+): number {
+  return subitems.filter((s) => isOdtType(s.artistType) === (role === "ODT")).length;
+}
+
+function countApprovedByRole(
+  subitems: AdminOrder["subitems"],
+  role: "אומן" | "ODT",
+  mode: "candidacy" | "arrival"
+): number {
+  return subitems.filter((s) => {
+    if (isOdtType(s.artistType) !== (role === "ODT")) return false;
+    if (mode === "arrival") return s.attendanceStatus === "מאושר";
+    return (s.candidacyStatus ?? "") === "מאושר";
+  }).length;
+}
+
+function AdminRoleProgress({
+  roleLabel,
+  required,
+  registered,
+  approved,
+  variant,
+}: {
+  roleLabel: string;
+  required: number;
+  registered: number;
+  approved: number;
+  variant: "artist" | "odt";
+}) {
+  if (required <= 0) return null;
+  const percent = Math.min(100, (approved / required) * 100);
+  const isFull = approved >= required;
+  const barColor =
+    variant === "odt"
+      ? isFull
+        ? "bg-green-400"
+        : "bg-violet-400"
+      : isFull
+        ? "bg-green-400"
+        : "bg-blue-400";
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span className={`font-semibold ${variant === "odt" ? "text-purple-700" : "text-blue-700"}`}>
+          {roleLabel}
+        </span>
+        <span className="text-gray-600">
+          <span className="font-semibold text-gray-800">{registered}</span> נרשמו
+        </span>
+        <span className="text-gray-600">
+          <span className={`font-semibold ${isFull ? "text-green-700" : "text-emerald-700"}`}>{approved}</span>
+          {" / "}
+          {required} מאושרים
+        </span>
+      </div>
+      <div className="w-full bg-gray-100 rounded-full h-1.5">
+        <div
+          className={`h-1.5 rounded-full transition-all ${barColor}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -378,8 +454,18 @@ function OrderAccordion({
       if (order.location) ws_data.push(["מיקום", order.location]);
       if (order.activityHours) ws_data.push(["שעות פעילות", order.activityHours]);
       ws_data.push(["סטטוס", order.status]);
-      ws_data.push(["נדרשים", order.requiredCount]);
-      ws_data.push(["נרשמו", order.assignedCount]);
+      ws_data.push(["אומנים נדרשים", order.requiredCount]);
+      ws_data.push(["אומנים נרשמו", order.assignedCount]);
+      ws_data.push([
+        "אומנים מאושרים",
+        countApprovedByRole(order.subitems, "אומן", statusMode),
+      ]);
+      ws_data.push(["ODT נדרשים", order.requiredOdtCount]);
+      ws_data.push(["ODT נרשמו", order.odtRegisteredCount]);
+      ws_data.push([
+        "ODT מאושרים",
+        countApprovedByRole(order.subitems, "ODT", statusMode),
+      ]);
       ws_data.push([]);
       // Header row
       ws_data.push(["שם", "טלפון", "תפקיד", "סטטוס מועמדות", "סטטוס הגעה"]);
@@ -414,16 +500,10 @@ function OrderAccordion({
       candidacyDateConflictMessage: sub.candidacyDateConflictMessage,
     }));
 
-  const totalRequired = order.requiredCount + order.requiredOdtCount;
-  const filledPercent =
-    totalRequired > 0
-      ? Math.min(100, (order.assignedCount / totalRequired) * 100)
-      : 0;
-
-  const confirmedCount =
-    statusMode === "arrival"
-      ? order.subitems.filter((s) => s.attendanceStatus === "מאושר").length
-      : order.subitems.filter((s) => (s.candidacyStatus ?? "") === "מאושר").length;
+  const artistRegistered = countRegisteredByRole(order.subitems, "אומן");
+  const odtRegistered = countRegisteredByRole(order.subitems, "ODT");
+  const artistApproved = countApprovedByRole(order.subitems, "אומן", statusMode);
+  const odtApproved = countApprovedByRole(order.subitems, "ODT", statusMode);
 
   const pendingCount =
     statusMode === "arrival"
@@ -538,61 +618,21 @@ function OrderAccordion({
 
             {/* Progress */}
             {(order.requiredCount > 0 || order.requiredOdtCount > 0) && (
-              <div>
-                <div className="flex gap-2 flex-wrap mb-2">
-                  {order.requiredCount > 0 && (
-                    <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1 text-xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                      <span className="text-gray-500">אומנים נדרשים</span>
-                      <span className="font-semibold text-gray-700">{order.requiredCount}</span>
-                    </div>
-                  )}
-                  {order.requiredOdtCount > 0 && (
-                    <div className="flex items-center gap-1.5 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1 text-xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                      <span className="text-purple-600">ODT נדרשים</span>
-                      <span className="font-semibold text-purple-700">{order.requiredOdtCount}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-2 flex-wrap mb-2">
-                  <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${
-                    order.assignedCount >= totalRequired
-                      ? "bg-green-50 border border-green-200"
-                      : "bg-blue-50 border border-blue-200"
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      order.assignedCount >= totalRequired ? "bg-green-500" : "bg-blue-400"
-                    }`} />
-                    <span className={order.assignedCount >= totalRequired ? "text-green-600" : "text-blue-600"}>נרשמו</span>
-                    <span className={`font-semibold ${order.assignedCount >= totalRequired ? "text-green-700" : "text-blue-700"}`}>{order.assignedCount}</span>
-                  </div>
-                  <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ${
-                    confirmedCount >= totalRequired
-                      ? "bg-green-50 border border-green-200"
-                      : confirmedCount > 0
-                        ? "bg-emerald-50 border border-emerald-200"
-                        : "bg-gray-50 border border-gray-200"
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      confirmedCount >= totalRequired ? "bg-green-500" : confirmedCount > 0 ? "bg-emerald-400" : "bg-gray-300"
-                    }`} />
-                    <span className={
-                      confirmedCount >= totalRequired ? "text-green-600" : confirmedCount > 0 ? "text-emerald-600" : "text-gray-500"
-                    }>מאושרים</span>
-                    <span className={`font-semibold ${
-                      confirmedCount >= totalRequired ? "text-green-700" : confirmedCount > 0 ? "text-emerald-700" : "text-gray-500"
-                    }`}>{confirmedCount}</span>
-                  </div>
-                </div>
-                <div className="w-full bg-gray-100 rounded-full h-1.5">
-                  <div
-                    className={`h-1.5 rounded-full transition-all ${
-                      filledPercent >= 100 ? "bg-green-400" : "bg-blue-400"
-                    }`}
-                    style={{ width: `${filledPercent}%` }}
-                  />
-                </div>
+              <div className="space-y-3">
+                <AdminRoleProgress
+                  roleLabel="אומנים"
+                  required={order.requiredCount}
+                  registered={artistRegistered}
+                  approved={artistApproved}
+                  variant="artist"
+                />
+                <AdminRoleProgress
+                  roleLabel="ODT"
+                  required={order.requiredOdtCount}
+                  registered={odtRegistered}
+                  approved={odtApproved}
+                  variant="odt"
+                />
               </div>
             )}
           </div>

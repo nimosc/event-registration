@@ -6,8 +6,6 @@ import {
   getAllOrders,
   getColumnValue,
   parseLinkedItemIds,
-  updateAssignedCount,
-  updateOrderStatus,
   getOrderAdminSnapshotById,
   getArtistByIdBasic,
   updateCandidacyConfirmation,
@@ -16,6 +14,7 @@ import {
   getOrderById,
   getOrderCapacityStateFromMondayItem,
   getCandidacyOrderStatusFromCapacity,
+  updateOrderStatus,
 } from "@/lib/monday";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
 
@@ -57,9 +56,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "לא ניתן לשבץ להזמנה שבה הסתיים השיבוץ" }, { status: 400 });
     }
 
-    const assignedCol = getColumnValue(order, "numeric_mm18d914");
-    const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
-
     // prevent duplicates for this artist
     const artistIdNum = parseInt(artistId, 10);
     const alreadyRegistered = (order.subitems || []).some((sub) => {
@@ -69,8 +65,6 @@ export async function POST(request: NextRequest) {
     if (alreadyRegistered) return NextResponse.json({ error: "האומן כבר משויך להזמנה" }, { status: 400 });
 
     const subitem = await createSubitem(orderId, artistBasic.name, artistBasic.id);
-    const newAssignedCount = assignedCount + 1;
-    await updateAssignedCount(orderId, newAssignedCount);
     // Mark candidacy as approved since this is an admin assignment.
     await updateCandidacyConfirmation(subitem.id, "מאושר");
 

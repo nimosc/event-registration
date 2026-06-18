@@ -561,6 +561,39 @@ export function countApprovedCandidaciesForRole(
   }).length;
 }
 
+/** כמה subitems נרשמו לתפקיד (מקור אמת — לא מונה Monday) */
+export function countRegisteredForRole(
+  subitems: Array<{ artistType?: string }>,
+  role: RegistrationRole
+): number {
+  return subitems.filter((sub) => {
+    const isOdt = isOdtSubitemArtistType(sub.artistType);
+    return role === "ODT" ? isOdt : !isOdt;
+  }).length;
+}
+
+export function getRegisteredCountsFromSubitems(
+  subitems: Array<{ artistType?: string }>
+): { artist: number; odt: number } {
+  return {
+    artist: countRegisteredForRole(subitems, "אומן"),
+    odt: countRegisteredForRole(subitems, "ODT"),
+  };
+}
+
+export function getRegisteredCountsFromMondaySubitems(
+  subitems: Array<{ column_values: MondayColumnValue[] }>
+): { artist: number; odt: number } {
+  let artist = 0;
+  let odt = 0;
+  for (const sub of subitems) {
+    const artistTypeCol = sub.column_values.find((cv) => cv.id === SUBITEM_ARTIST_TYPE_COLUMN_ID);
+    if ((artistTypeCol?.text || "").trim() === "ODT") odt++;
+    else artist++;
+  }
+  return { artist, odt };
+}
+
 export function getApprovedCountsFromMondaySubitems(
   subitems: Array<{ column_values: MondayColumnValue[] }>
 ): { artist: number; odt: number } {
@@ -743,9 +776,23 @@ export async function restoreOrderStatusesFromActivityLogs(
         activityLogTimeMs(log.created_at) >= bugStartMs
       );
     });
-    if (!wrongful) continue;
-    const { previousText } = parseStatusActivityLogData(wrongful.data);
-    if (previousText) restoreByPulse.set(pulseId, previousText);
+    if (wrongful) {
+      const { previousText } = parseStatusActivityLogData(wrongful.data);
+      if (previousText) restoreByPulse.set(pulseId, previousText);
+      continue;
+    }
+
+    const wrongfulAssignDone = sorted.find((log) => {
+      const { valueText, previousText } = parseStatusActivityLogData(log.data);
+      return (
+        valueText === STATUS_ASSIGNMENT_DONE &&
+        previousText === "הסתיים טיפול" &&
+        activityLogTimeMs(log.created_at) >= bugStartMs
+      );
+    });
+    if (wrongfulAssignDone) {
+      restoreByPulse.set(pulseId, "הסתיים טיפול");
+    }
   }
 
   const items = await getAllOrders();
@@ -999,7 +1046,10 @@ export interface AdminOrderDto {
   status: string;
   requiredCount: number;
   requiredOdtCount: number;
+  /** אומנים שנרשמו — ספירה מ-subitems */
   assignedCount: number;
+  /** ODT שנרשמו — ספירה מ-subitems */
+  odtRegisteredCount: number;
   spotsRemaining: number;
   subitems: AdminOrderSubitem[];
 }
@@ -1158,12 +1208,9 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
   const activityHoursCol = getColumnValue(item, ORDER_ACTIVITY_HOURS_COLUMN_ID);
   const requiredCol = getColumnValue(item, "numeric_mm185aw7");
   const requiredOdtCol = getColumnValue(item, ODT_REQUIRED_COLUMN_ID);
-  const assignedCol = getColumnValue(item, "numeric_mm18d914");
 
   const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
   const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
-  const assignedCount = parseFloat(assignedCol?.text || "0") || 0;
-  const totalRequired = requiredCount + requiredOdtCount;
 
   const subitems = (item.subitems || []).map((sub) => {
     const relationCol = sub.column_values.find(
@@ -1188,6 +1235,8 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
     };
   });
 
+  const registered = getRegisteredCountsFromSubitems(subitems);
+  const approvedArtist = countApprovedCandidaciesForRole(subitems, "אומן");
   const isoDate = parseMondayDateValue(dateCol?.value);
   return {
     id: item.id,
@@ -1198,8 +1247,9 @@ export function mapMondayOrderItemToAdminOrder(item: MondayItem): AdminOrderDto 
     status: statusCol?.text || "",
     requiredCount,
     requiredOdtCount,
-    assignedCount,
-    spotsRemaining: Math.max(0, totalRequired - assignedCount),
+    assignedCount: registered.artist,
+    odtRegisteredCount: registered.odt,
+    spotsRemaining: Math.max(0, requiredCount - approvedArtist),
     subitems,
   };
 }
