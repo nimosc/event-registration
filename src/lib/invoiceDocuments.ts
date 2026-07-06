@@ -18,6 +18,13 @@ export const INVOICE_SUBMISSION_TYPE = {
   REVIEW: "בקשה לבדיקה",
 } as const;
 
+/** Invoice board column "סטטוס התאמה" */
+export const INVOICE_MATCH_STATUS = {
+  OK: "תקין",
+  REQUEST_DIFFERENT: "בקשת תשלום שונה",
+  RECEIPT_DIFFERENT: "קבלה שונה מהבקשת תשלום",
+} as const;
+
 export type InvoiceSubmissionStatus =
   (typeof INVOICE_SUBMISSION_STATUS)[keyof typeof INVOICE_SUBMISSION_STATUS];
 

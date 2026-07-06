@@ -34,6 +34,7 @@ export const INVOICE_PAYMENT_REQUEST_FILE_COLUMN_ID = "file_mm46at55"; // בקש
 export const INVOICE_SUBMISSION_STATUS_COLUMN_ID = "color_mm4699gb"; // סטטוס הגשה
 export const INVOICE_PAYMENT_REQUEST_NUMBER_COLUMN_ID = "text_mm50g77q"; // מספר בקשת תשלום
 export const INVOICE_SUBMISSION_TYPE_COLUMN_ID = "color_mm5051wy";        // סוג הגשה: בקשת תשלום חודשית / בקשה לבדיקה
+export const INVOICE_MATCH_STATUS_COLUMN_ID = "color_mm50n91j"; // סטטוס התאמה: תקין / בקשת תשלום שונה / קבלה שונה מהבקשת תשלום
 
 export interface MondayColumnValue {
   id: string;
@@ -542,6 +543,9 @@ export interface RoleCapacityState {
   required: number;
   /** מספר מועמדויות מאושרות לתפקיד */
   approved: number;
+  /** מאושרים ≥ נדרשים — האירוע מלא, אך עדיין ניתן להגיש מועמדות לרשימת המתנה */
+  isFull: boolean;
+  /** כל התפקידים הרלוונטיים מלאים — לשימוש בעדכון סטטוס הזמנה */
   isClosed: boolean;
 }
 
@@ -640,10 +644,12 @@ export function getApprovedCountsFromMondaySubitems(
 }
 
 export function getRoleCapacityState(required: number, approved: number): RoleCapacityState {
+  const isFull = required > 0 && approved >= required;
   return {
     required,
     approved,
-    isClosed: required > 0 && approved >= required,
+    isFull,
+    isClosed: isFull,
   };
 }
 
@@ -671,8 +677,15 @@ export function isRegistrationOpenForRole(
   capacity: OrderCapacityState
 ): boolean {
   const state = role === "ODT" ? capacity.odt : capacity.artist;
-  if (state.required <= 0) return false;
-  return !state.isClosed;
+  return state.required > 0;
+}
+
+/** האם ההזמנה פתוחה להגשת מועמדויות חדשות (לפי סטטוס בלבד) */
+export function isOrderOpenForRegistration(status: string): boolean {
+  if (status === STATUS_CANCELLED) return false;
+  if (status === STATUS_ASSIGNMENT_DONE) return false;
+  if (status === STATUS_CANDIDACY_CLOSED) return false;
+  return true;
 }
 
 export function areAllRelevantRolesAtCapacity(
@@ -1773,6 +1786,7 @@ export async function createInvoiceItem(params: {
   submissionStatus?: string;
   paymentRequestNumber?: string; // בקשת תשלום document number (kept separate from invoiceNumber)
   submissionType?: string;       // בקשת תשלום חודשית / בקשה לבדיקה
+  matchStatus?: string;          // סטטוס התאמה: תקין / בקשת תשלום שונה / קבלה שונה מהבקשת תשלום
 }): Promise<{ id: string }> {
   const itemName = `חשבונית - ${params.monthLabel} - ${params.artistName}`;
   const groupTitle = resolveInvoiceGroupTitle(params.monthKey, params.eventDate);
@@ -1796,6 +1810,9 @@ export async function createInvoiceItem(params: {
   }
   if (params.submissionType) {
     colValues[INVOICE_SUBMISSION_TYPE_COLUMN_ID] = { label: params.submissionType };
+  }
+  if (params.matchStatus) {
+    colValues[INVOICE_MATCH_STATUS_COLUMN_ID] = { label: params.matchStatus };
   }
   if (params.bankDetails) colValues["text9"] = params.bankDetails;
   if (params.beneficiaryName) colValues[INVOICE_BANK_BENEFICIARY_COLUMN_ID] = params.beneficiaryName;
@@ -1922,6 +1939,22 @@ export async function updateInvoiceSubmissionStatus(
         item_id: ${invoiceItemId},
         column_id: "${INVOICE_SUBMISSION_STATUS_COLUMN_ID}",
         value: ${JSON.stringify(JSON.stringify({ label: submissionStatus }))}
+      ) { id }
+    }`
+  );
+}
+
+export async function updateInvoiceMatchStatus(
+  invoiceItemId: string,
+  matchStatus: string
+): Promise<void> {
+  await mondayQuery(
+    `mutation {
+      change_column_value(
+        board_id: ${BOARDS.INVOICES},
+        item_id: ${invoiceItemId},
+        column_id: "${INVOICE_MATCH_STATUS_COLUMN_ID}",
+        value: ${JSON.stringify(JSON.stringify({ label: matchStatus }))}
       ) { id }
     }`
   );
