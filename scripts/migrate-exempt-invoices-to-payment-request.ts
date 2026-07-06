@@ -88,8 +88,12 @@ async function main() {
     INVOICE_ORDER_IDS_COLUMN_ID,
     INVOICE_ORDER_RELATION_COLUMN_ID,
     INVOICE_SUBMISSION_STATUS_COLUMN_ID,
+    INVOICE_NUMBER_COLUMN_ID,
+    INVOICE_DESCRIPTION_COLUMN_ID,
+    INVOICE_PAYMENT_REQUEST_NUMBER_COLUMN_ID,
+    INVOICE_SUBMISSION_TYPE_COLUMN_ID,
   } = await import("../src/lib/monday");
-  const { INVOICE_SUBMISSION_STATUS, SUBITEM_INVOICE_STATUS } = await import(
+  const { INVOICE_SUBMISSION_STATUS, SUBITEM_INVOICE_STATUS, INVOICE_SUBMISSION_TYPE } = await import(
     "../src/lib/invoiceDocuments"
   );
 
@@ -106,7 +110,11 @@ async function main() {
               "${INVOICE_ORDER_IDS_COLUMN_ID}",
               "${INVOICE_ORDER_RELATION_COLUMN_ID}",
               "${INVOICE_ACCOUNTING_FILE_COLUMN_ID}",
-              "${INVOICE_PAYMENT_REQUEST_FILE_COLUMN_ID}"
+              "${INVOICE_PAYMENT_REQUEST_FILE_COLUMN_ID}",
+              "${INVOICE_NUMBER_COLUMN_ID}",
+              "${INVOICE_DESCRIPTION_COLUMN_ID}",
+              "${INVOICE_PAYMENT_REQUEST_NUMBER_COLUMN_ID}",
+              "${INVOICE_SUBMISSION_TYPE_COLUMN_ID}"
             ]) {
               id
               text
@@ -140,6 +148,8 @@ async function main() {
   let skippedWrongStatus = 0;
   let skippedNoAccountingFile = 0;
   let skippedHasPaymentRequest = 0;
+  const typeBackfills: Array<{ itemId: string; name: string; submissionType: string }> = [];
+  const numberMoves: Array<{ itemId: string; name: string; number: string }> = [];
 
   for (const item of items) {
     scanned++;
@@ -150,6 +160,30 @@ async function main() {
     const artistRelation = byId(INVOICE_ARTIST_RELATION_COLUMN_ID);
     const artistIdStr = artistRelation?.linked_item_ids?.[0];
     const artistId = artistIdStr ? parseInt(artistIdStr, 10) : NaN;
+
+    const invoiceNumberText = (byId(INVOICE_NUMBER_COLUMN_ID)?.text || "").trim();
+    const descriptionText = (byId(INVOICE_DESCRIPTION_COLUMN_ID)?.text || "").trim();
+    const paymentRequestNumberText = (byId(INVOICE_PAYMENT_REQUEST_NUMBER_COLUMN_ID)?.text || "").trim();
+    const submissionTypeText = (byId(INVOICE_SUBMISSION_TYPE_COLUMN_ID)?.text || "").trim();
+
+    // Backfill 1: submission type for every item that doesn't have one yet.
+    if (!submissionTypeText) {
+      typeBackfills.push({
+        itemId: item.id,
+        name: item.name,
+        submissionType: descriptionText.startsWith("הגשה ידנית — חסר במערכת")
+          ? INVOICE_SUBMISSION_TYPE.REVIEW
+          : INVOICE_SUBMISSION_TYPE.MONTHLY,
+      });
+    }
+
+    // Backfill 2: items sitting at the payment-request stage have a payment-request
+    // number stored in the invoice-number column — move it. Exempt one-step items
+    // (this script's main targets) reach that stage during this run, so include them below.
+    const atPaymentRequestStage = submissionStatus === INVOICE_SUBMISSION_STATUS.PAYMENT_REQUEST;
+    if (atPaymentRequestStage && invoiceNumberText && !paymentRequestNumberText) {
+      numberMoves.push({ itemId: item.id, name: item.name, number: invoiceNumberText });
+    }
 
     if (submissionStatus !== INVOICE_SUBMISSION_STATUS.ACCOUNTING) {
       skippedWrongStatus++;
@@ -181,6 +215,10 @@ async function main() {
     );
     const assets = (item.assets ?? []).filter((a) => a.public_url);
 
+    if (invoiceNumberText && !paymentRequestNumberText) {
+      numberMoves.push({ itemId: item.id, name: item.name, number: invoiceNumberText });
+    }
+
     targets.push({ item, artistId, orderIds, assets });
   }
 
@@ -196,6 +234,8 @@ async function main() {
         (t.assets.length === 0 ? "  ⚠ no downloadable asset (public_url missing)" : "")
     );
   }
+  console.log(`Submission-type backfills: ${typeBackfills.length}`);
+  console.log(`Payment-request number moves: ${numberMoves.length}`);
 
   if (!apply) {
     console.log("\nDry run. Pass --apply to perform the migration.");
@@ -247,6 +287,45 @@ async function main() {
     } catch (err) {
       failed++;
       console.error(`FAILED #${t.item.id} "${t.item.name}":`, err);
+    }
+  }
+
+  for (const b of typeBackfills) {
+    try {
+      await mondayQuery(
+        `mutation {
+          change_column_value(
+            board_id: ${BOARDS.INVOICES},
+            item_id: ${b.itemId},
+            column_id: "${INVOICE_SUBMISSION_TYPE_COLUMN_ID}",
+            value: ${JSON.stringify(JSON.stringify({ label: b.submissionType }))}
+          ) { id }
+        }`
+      );
+      console.log(`type-backfill #${b.itemId} → ${b.submissionType}`);
+    } catch (err) {
+      console.error(`FAILED type-backfill #${b.itemId} "${b.name}":`, err);
+    }
+  }
+
+  for (const m of numberMoves) {
+    try {
+      await mondayQuery(
+        `mutation ($boardId: ID!, $itemId: ID!, $columnValues: JSON!) {
+          change_multiple_column_values(board_id: $boardId, item_id: $itemId, column_values: $columnValues) { id }
+        }`,
+        {
+          boardId: String(BOARDS.INVOICES),
+          itemId: m.itemId,
+          columnValues: JSON.stringify({
+            [INVOICE_PAYMENT_REQUEST_NUMBER_COLUMN_ID]: m.number,
+            [INVOICE_NUMBER_COLUMN_ID]: "",
+          }),
+        }
+      );
+      console.log(`number-move #${m.itemId} → "${m.number}"`);
+    } catch (err) {
+      console.error(`FAILED number-move #${m.itemId} "${m.name}":`, err);
     }
   }
 
