@@ -25,11 +25,13 @@ import {
 } from "@/lib/invoiceEligibility";
 import {
   getInitialDocumentForTaxStatus,
+  INVOICE_MATCH_STATUS,
   INVOICE_SUBMISSION_STATUS,
   INVOICE_SUBMISSION_TYPE,
 } from "@/lib/invoiceDocuments";
 import {
   extractInvoiceDataWithTimeout,
+  invoiceAmountsMatch,
   validateExtractedAgainstExpected,
 } from "@/lib/invoiceAiValidation";
 
@@ -236,6 +238,10 @@ export async function POST(req: NextRequest) {
     submissionType: voluntarySubmission
       ? INVOICE_SUBMISSION_TYPE.REVIEW
       : INVOICE_SUBMISSION_TYPE.MONTHLY,
+    matchStatus:
+      voluntarySubmission || invoiceAmountsMatch(reportedAmount, resolvedAmount)
+        ? INVOICE_MATCH_STATUS.OK
+        : INVOICE_MATCH_STATUS.REQUEST_DIFFERENT,
     bankDetails,
     beneficiaryName,
     bankCode,
