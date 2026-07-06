@@ -846,13 +846,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   </div>
                 )}
               </div>
-              <p className="text-sm text-gray-500 mt-1">
-                {artistStatus === "מורשה"
-                  ? "עוסק מורשה: תחילה מגישים בקשת תשלום, ולאחר קבלת התשלום — חשבונית מס קבלה"
-                  : artistStatus === "פטור"
-                    ? "עוסק פטור: תחילה מגישים בקשת תשלום, ולאחר קבלת התשלום — קבלה"
-                    : "הגשת מסמכים מתבצעת פעם בחודש מהכפתור בראש הטבלה"}
-              </p>
             </div>
             <button
               onClick={fetchData}
@@ -902,6 +895,32 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
             </div>
           )}
         </div>
+
+        {!loading && (
+          <div className="mb-6 rounded-2xl border-2 border-blue-200 bg-blue-50 p-4 sm:p-5">
+            <p className="font-bold text-blue-900 text-base mb-3">איך מגישים? שני כללים חשובים:</p>
+            <ol className="space-y-3 text-sm sm:text-base text-blue-900">
+              <li className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">1</span>
+                <span>
+                  <span className="font-semibold">מגישים פעם בחודש, במרוכז</span> — הגשה אחת לכל אירועי החודש, רק אחרי שהחודש הסתיים.
+                </span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">2</span>
+                <span>
+                  לפני התשלום מעלים <span className="font-semibold">בקשת תשלום</span>, ואחרי קבלת התשלום —{" "}
+                  <span className="font-semibold">
+                    {artistStatus
+                      ? followUpAccountingDocument.fileLabel
+                      : "קבלה או חשבונית מס קבלה (לפי סוג העוסק)"}
+                  </span>
+                  .
+                </span>
+              </li>
+            </ol>
+          </div>
+        )}
 
         {!loading && pendingAccountingInvoices.length > 0 && (
           <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 sm:p-5">
