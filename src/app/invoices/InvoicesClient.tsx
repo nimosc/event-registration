@@ -393,6 +393,13 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     filtered.length === 0 &&
     canSubmitForSelectedMonth;
   const voluntaryDocumentLabel = "בקשת תשלום";
+  const invoicesInSelectedMonth = useMemo(
+    () =>
+      selectedMonth === "all"
+        ? invoices
+        : invoices.filter((inv) => parseInvoiceMonthKey(inv.date) === selectedMonth),
+    [invoices, selectedMonth]
+  );
 
   const { incomeBySubitemId } = useMemo(() => {
     const byId: Record<string, number> = {};
@@ -1149,9 +1156,12 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           </div>
         )}
 
-        {invoices.length > 0 && (
+        {invoicesInSelectedMonth.length > 0 && (
           <div className="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <div className="px-4 py-3 border-b border-gray-200 font-medium text-gray-700">החשבוניות שלי ({invoices.length})</div>
+            <div className="px-4 py-3 border-b border-gray-200 font-medium text-gray-700">
+              החשבוניות שלי ({invoicesInSelectedMonth.length})
+              {selectedMonth !== "all" && ` — ${monthKeyToLabel(selectedMonth)}`}
+            </div>
             <table className="w-full text-right text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
@@ -1162,7 +1172,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {invoices.map((inv) => (
+                {invoicesInSelectedMonth.map((inv) => (
                   (() => {
                     const needsAccountingUpload = isAwaitingAccountingDocument(inv.submissionStatus);
                     return (
