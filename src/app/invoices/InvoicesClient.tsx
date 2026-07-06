@@ -514,7 +514,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     }
   }, [accountingInvoiceNumber, followUpAccountingDocument.extractFromFile]);
 
-  const accountingValidationError = useMemo(() => {
+  const accountingNumberError = useMemo(() => {
     if (!accountingInvoice || !accountingFile) return null;
     const expectedAmount =
       accountingInvoice.reportedAmount ?? accountingInvoice.actualAmount ?? accountingInvoice.amount;
@@ -526,7 +526,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       },
       expectedAmount,
       declaredNumber: accountingInvoiceNumber,
-      requireAmountWhenExtracted: true,
+      requireAmountWhenExtracted: false,
       requireNumberWhenBothPresent: true,
     });
   }, [
@@ -536,6 +536,22 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     accountingInvoice,
     accountingInvoiceNumber,
   ]);
+
+  const accountingAmountWarning = useMemo(() => {
+    if (!accountingInvoice || !accountingFile) return null;
+    const expectedAmount =
+      accountingInvoice.reportedAmount ?? accountingInvoice.actualAmount ?? accountingInvoice.amount;
+    return validateExtractedAgainstExpected({
+      extracted: {
+        receiptNumber: null,
+        amount: accountingExtractedAmount,
+        description: null,
+      },
+      expectedAmount,
+      requireAmountWhenExtracted: true,
+      requireNumberWhenBothPresent: false,
+    });
+  }, [accountingExtractedAmount, accountingFile, accountingInvoice]);
 
   const handleSubmitAccountingDocument = useCallback(async () => {
     const monthError = getInvoiceMonthSubmissionError(
@@ -553,8 +569,8 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setError("חובה למלא מספר חשבונית / קבלה");
       return;
     }
-    if (accountingValidationError) {
-      setError(accountingValidationError);
+    if (accountingNumberError) {
+      setError(accountingNumberError);
       return;
     }
     setSubmittingAccounting(true);
@@ -597,7 +613,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     accountingInvoice,
     accountingInvoiceId,
     accountingInvoiceNumber,
-    accountingValidationError,
+    accountingNumberError,
     fetchData,
     followUpAccountingDocument.fileLabel,
   ]);
@@ -1705,9 +1721,15 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   סכום שחולץ מהקובץ: {accountingExtractedAmount.toLocaleString("he-IL")} ₪
                 </p>
               )}
-              {accountingValidationError && (
+              {accountingNumberError && (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {accountingValidationError}
+                  {accountingNumberError}
+                </div>
+              )}
+              {!accountingNumberError && accountingAmountWarning && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {accountingAmountWarning}
+                  <div className="mt-1 font-medium">ניתן להגיש — הרשומה תסומן לבדיקת מנהל.</div>
                 </div>
               )}
               <div className="flex gap-2 justify-end">
@@ -1722,7 +1744,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={submittingAccounting || !accountingFile || !accountingInvoiceNumber.trim() || Boolean(accountingValidationError)}
+                  disabled={submittingAccounting || !accountingFile || !accountingInvoiceNumber.trim() || Boolean(accountingNumberError)}
                   onClick={handleSubmitAccountingDocument}
                 >
                   {submittingAccounting ? "מעדכן..." : `עדכן רשומה — ${followUpAccountingDocument.fileLabel}`}
