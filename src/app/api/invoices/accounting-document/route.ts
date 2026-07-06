@@ -8,6 +8,7 @@ import {
   markSubitemsInvoiceSubmitted,
   uploadFileToInvoiceColumn,
   updateInvoiceSubmissionStatus,
+  updateInvoiceMatchStatus,
   updateInvoiceAccountingDetails,
   INVOICE_ACCOUNTING_FILE_COLUMN_ID,
   getArtistSubitemIdsForOrderIds,
@@ -19,10 +20,12 @@ import {
 } from "@/lib/invoiceEligibility";
 import {
   getFollowUpAccountingDocument,
+  INVOICE_MATCH_STATUS,
   INVOICE_SUBMISSION_STATUS,
 } from "@/lib/invoiceDocuments";
 import {
   extractInvoiceDataWithTimeout,
+  invoiceAmountsMatch,
   validateExtractedAgainstExpected,
 } from "@/lib/invoiceAiValidation";
 
@@ -112,16 +115,20 @@ export async function POST(req: NextRequest) {
 
     const expectedAmount = invoice.reportedAmount || invoice.actualAmount || invoice.amount;
     const extracted = await extractInvoiceDataWithTimeout(file);
-    const validationError = validateExtractedAgainstExpected({
+    // Typo guard: a declared number that contradicts the file still blocks.
+    const numberError = validateExtractedAgainstExpected({
       extracted,
       expectedAmount,
       declaredNumber: invoiceNumber,
-      requireAmountWhenExtracted: true,
+      requireAmountWhenExtracted: false,
       requireNumberWhenBothPresent: true,
     });
-    if (validationError) {
-      return NextResponse.json({ error: validationError }, { status: 400 });
+    if (numberError) {
+      return NextResponse.json({ error: numberError }, { status: 400 });
     }
+    // Amount mismatch vs the payment request is accepted and flagged for admin review.
+    const receiptAmountMismatch =
+      extracted?.amount != null && !invoiceAmountsMatch(extracted.amount, expectedAmount);
 
     await uploadFileToInvoiceColumn(invoiceId, INVOICE_ACCOUNTING_FILE_COLUMN_ID, file, file.name);
     await updateInvoiceAccountingDetails(invoiceId, {
@@ -129,6 +136,9 @@ export async function POST(req: NextRequest) {
       extractedAmount: extracted?.amount ?? undefined,
     });
     await updateInvoiceSubmissionStatus(invoiceId, accountingDocument.submissionStatus);
+    if (receiptAmountMismatch) {
+      await updateInvoiceMatchStatus(invoiceId, INVOICE_MATCH_STATUS.RECEIPT_DIFFERENT);
+    }
 
     const subitemIds = await getArtistSubitemIdsForOrderIds(
       invoice.orderIds,
