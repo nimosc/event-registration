@@ -23,7 +23,11 @@ import {
   getInvoiceMonthSubmissionError,
   parseInvoiceMonthKey,
 } from "@/lib/invoiceEligibility";
-import { getInitialDocumentForTaxStatus, INVOICE_SUBMISSION_STATUS } from "@/lib/invoiceDocuments";
+import {
+  getInitialDocumentForTaxStatus,
+  INVOICE_SUBMISSION_STATUS,
+  INVOICE_SUBMISSION_TYPE,
+} from "@/lib/invoiceDocuments";
 import {
   extractInvoiceDataWithTimeout,
   validateExtractedAgainstExpected,
@@ -227,7 +231,11 @@ export async function POST(req: NextRequest) {
     amount: resolvedAmount,
     actualAmount: resolvedActualAmount,
     extractedAmount,
-    invoiceNumber,
+    invoiceNumber: "",
+    paymentRequestNumber: invoiceNumber,
+    submissionType: voluntarySubmission
+      ? INVOICE_SUBMISSION_TYPE.REVIEW
+      : INVOICE_SUBMISSION_TYPE.MONTHLY,
     bankDetails,
     beneficiaryName,
     bankCode,
