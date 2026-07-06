@@ -10,7 +10,9 @@ export interface ExtractedInvoiceData {
 function getAnthropicClient(): Anthropic | null {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) return null;
-  return new Anthropic({ apiKey });
+  // Extraction hits transient 529 "overloaded" errors; retry a bit more than the
+  // SDK default (2) with its built-in exponential backoff to ride out short spikes.
+  return new Anthropic({ apiKey, maxRetries: 4 });
 }
 
 function resolveMediaType(file: File): string {
