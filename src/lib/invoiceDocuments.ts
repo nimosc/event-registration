@@ -12,6 +12,12 @@ export const SUBITEM_INVOICE_STATUS = {
   SUBMITTED: "הוגשה",
 } as const;
 
+/** Invoice board column "סוג הגשה" */
+export const INVOICE_SUBMISSION_TYPE = {
+  MONTHLY: "בקשת תשלום חודשית",
+  REVIEW: "בקשה לבדיקה",
+} as const;
+
 export type InvoiceSubmissionStatus =
   (typeof INVOICE_SUBMISSION_STATUS)[keyof typeof INVOICE_SUBMISSION_STATUS];
 

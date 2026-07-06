@@ -32,6 +32,8 @@ export const SUBITEM_INVOICE_RELATION_COLUMN_ID = "board_relation_mm3shx2f"; // 
 export const INVOICE_ACCOUNTING_FILE_COLUMN_ID = "file_mm3s4kna";    // מסמך חשבונאי (קבלה / חשבונית מס קבלה)
 export const INVOICE_PAYMENT_REQUEST_FILE_COLUMN_ID = "file_mm46at55"; // בקשת תשלום
 export const INVOICE_SUBMISSION_STATUS_COLUMN_ID = "color_mm4699gb"; // סטטוס הגשה
+export const INVOICE_PAYMENT_REQUEST_NUMBER_COLUMN_ID = "text_mm50g77q"; // מספר בקשת תשלום
+export const INVOICE_SUBMISSION_TYPE_COLUMN_ID = "color_mm5051wy";        // סוג הגשה: בקשת תשלום חודשית / בקשה לבדיקה
 
 export interface MondayColumnValue {
   id: string;
@@ -1769,6 +1771,8 @@ export async function createInvoiceItem(params: {
   monthLabel: string;
   monthKey: string;
   submissionStatus?: string;
+  paymentRequestNumber?: string; // בקשת תשלום document number (kept separate from invoiceNumber)
+  submissionType?: string;       // בקשת תשלום חודשית / בקשה לבדיקה
 }): Promise<{ id: string }> {
   const itemName = `חשבונית - ${params.monthLabel} - ${params.artistName}`;
   const groupTitle = resolveInvoiceGroupTitle(params.monthKey, params.eventDate);
@@ -1787,6 +1791,12 @@ export async function createInvoiceItem(params: {
     colValues[INVOICE_AMOUNT_REPORTED_COLUMN_ID] = reportedAmountToSave;
   }
   if (params.invoiceNumber) colValues[INVOICE_NUMBER_COLUMN_ID] = params.invoiceNumber;
+  if (params.paymentRequestNumber) {
+    colValues[INVOICE_PAYMENT_REQUEST_NUMBER_COLUMN_ID] = params.paymentRequestNumber;
+  }
+  if (params.submissionType) {
+    colValues[INVOICE_SUBMISSION_TYPE_COLUMN_ID] = { label: params.submissionType };
+  }
   if (params.bankDetails) colValues["text9"] = params.bankDetails;
   if (params.beneficiaryName) colValues[INVOICE_BANK_BENEFICIARY_COLUMN_ID] = params.beneficiaryName;
   if (params.bankCode) colValues[INVOICE_BANK_CODE_COLUMN_ID] = params.bankCode;
