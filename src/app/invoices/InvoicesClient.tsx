@@ -470,10 +470,10 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     }
   }, [initialDocumentConfig?.extractFromFile]);
 
-  const openAccountingModal = useCallback((invoiceId: string, invoiceNumber = "") => {
+  const openAccountingModal = useCallback((invoiceId: string) => {
     setAccountingInvoiceId(invoiceId);
     setAccountingFile(null);
-    setAccountingInvoiceNumber(invoiceNumber);
+    setAccountingInvoiceNumber("");
     setAccountingExtractedAmount(null);
     setAccountingExtractedNumber("");
     setShowAccountingModal(true);
@@ -925,7 +925,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   <button
                     type="button"
                     className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
-                    onClick={() => openAccountingModal(inv.id, inv.invoiceNumber || "")}
+                    onClick={() => openAccountingModal(inv.id)}
                   >
                     העלה {followUpAccountingDocument.fileLabel}
                   </button>
@@ -969,14 +969,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
               {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length > 0 && pendingAccountingInvoiceIdForSelectedMonth && canSubmitForSelectedMonth && (
                 <button
                   type="button"
-                  onClick={() => {
-                    const inv = pendingAccountingInvoiceForSelectedMonth
-                      ?? invoices.find((i) => i.id === pendingAccountingInvoiceIdForSelectedMonth);
-                    openAccountingModal(
-                      pendingAccountingInvoiceIdForSelectedMonth,
-                      inv?.invoiceNumber || ""
-                    );
-                  }}
+                  onClick={() => openAccountingModal(pendingAccountingInvoiceIdForSelectedMonth)}
                   className="btn-primary inline-flex items-center justify-center gap-2 text-sm"
                 >
                   העלה {followUpAccountingDocument.fileLabel} לחודש
@@ -1114,11 +1107,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                                 <button
                                   type="button"
                                   className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
-                                  onClick={() => {
-                                    const invId = accountingInvoiceId || reg.linkedInvoiceId || "";
-                                    const inv = invoices.find((i) => i.id === invId);
-                                    openAccountingModal(invId, inv?.invoiceNumber || "");
-                                  }}
+                                  onClick={() =>
+                                    openAccountingModal(accountingInvoiceId || reg.linkedInvoiceId || "")
+                                  }
                                 >
                                   העלה {followUpAccountingDocument.fileLabel}
                                 </button>
@@ -1173,7 +1164,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                         <button
                           type="button"
                           className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
-                          onClick={() => openAccountingModal(inv.id, inv.invoiceNumber || "")}
+                          onClick={() => openAccountingModal(inv.id)}
                         >
                           העלה {followUpAccountingDocument.fileLabel}
                         </button>
@@ -1283,7 +1274,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   <input
                     type="text"
                     className="input-field"
-                    placeholder="מספר חשבונית / קבלה"
+                    placeholder="מספר בקשת תשלום"
                     value={invoiceForm.invoiceNumber}
                     onChange={(e) => setInvoiceForm((f) => ({ ...f, invoiceNumber: e.target.value }))}
                   />
@@ -1537,7 +1528,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                     </div>
                     {invoiceFile && initialDocumentConfig?.extractFromFile && (
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <label className="text-sm font-medium text-gray-700 whitespace-nowrap">מספר חשבונית / קבלה</label>
+                        <label className="text-sm font-medium text-gray-700 whitespace-nowrap">מספר בקשת תשלום</label>
                         <input
                           type="text"
                           className="input-field w-full sm:max-w-[360px]"
