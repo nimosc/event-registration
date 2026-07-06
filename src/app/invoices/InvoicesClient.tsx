@@ -197,7 +197,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   const initialDocumentConfig = artistStatus
     ? getInitialDocumentForTaxStatus(artistStatus)
     : null;
-  const followUpAccountingDocument = getFollowUpAccountingDocument();
+  const followUpAccountingDocument = getFollowUpAccountingDocument(artistStatus || "מורשה");
   const [editingTaxStatus, setEditingTaxStatus] = useState(false);
   const [savingTaxStatus, setSavingTaxStatus] = useState(false);
   const [artistBankDetails, setArtistBankDetails] = useState({
@@ -392,8 +392,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     Boolean(artistStatus) &&
     filtered.length === 0 &&
     canSubmitForSelectedMonth;
-  const voluntaryDocumentLabel =
-    artistStatus === "מורשה" ? "בקשת תשלום" : "קבלה";
+  const voluntaryDocumentLabel = "בקשת תשלום";
 
   const { incomeBySubitemId } = useMemo(() => {
     const byId: Record<string, number> = {};
@@ -540,7 +539,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       return;
     }
     if (!accountingInvoiceId || !accountingFile) {
-      setError("חובה לצרף חשבונית מס קבלה");
+      setError(`חובה לצרף ${followUpAccountingDocument.fileLabel}`);
       return;
     }
     if (!accountingInvoiceNumber.trim()) {
@@ -578,7 +577,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setAccountingInvoiceNumber("");
       setAccountingExtractedAmount(null);
       setAccountingExtractedNumber("");
-      setInvoiceSuccess("הרשומה עודכנה — חשבונית מס קבלה הוגשה בהצלחה");
+      setInvoiceSuccess(`הרשומה עודכנה — ${followUpAccountingDocument.fileLabel} הוגשה בהצלחה`);
       setTimeout(() => setInvoiceSuccess(null), 5000);
       await fetchData();
     } catch {
@@ -593,6 +592,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     accountingInvoiceNumber,
     accountingValidationError,
     fetchData,
+    followUpAccountingDocument.fileLabel,
   ]);
 
   const openVoluntaryModal = useCallback(() => {
@@ -850,7 +850,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 {artistStatus === "מורשה"
                   ? "עוסק מורשה: תחילה מגישים בקשת תשלום, ולאחר קבלת התשלום — חשבונית מס קבלה"
                   : artistStatus === "פטור"
-                    ? "עוסק פטור: מגישים קבלה כמסמך חשבונאי"
+                    ? "עוסק פטור: תחילה מגישים בקשת תשלום, ולאחר קבלת התשלום — קבלה"
                     : "הגשת מסמכים מתבצעת פעם בחודש מהכפתור בראש הטבלה"}
               </p>
             </div>
@@ -895,7 +895,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
               {awaitingAccountingCount > 0 && (
                 <div className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-sm">
                   <span className="h-2 w-2 rounded-full bg-amber-500" />
-                  <span className="text-amber-700">ממתינות לחשבונית מס קבלה</span>
+                  <span className="text-amber-700">ממתינות ל{followUpAccountingDocument.fileLabel}</span>
                   <span className="font-semibold text-amber-800">{awaitingAccountingCount}</span>
                 </div>
               )}
@@ -908,10 +908,10 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="font-semibold text-amber-900">
-                  הגשת בקשת תשלום — צריך להגיש חשבונית מס קבלה
+                  הגשת בקשת תשלום — צריך להגיש {followUpAccountingDocument.fileLabel}
                 </p>
                 <p className="text-sm text-amber-800 mt-1">
-                  לכל חודש יש רשומה נפרדת — העלה חשבונית מס קבלה לכל חודש בנפרד (לא מסמך אחד לכמה חודשים).
+                  לכל חודש יש רשומה נפרדת — העלה {followUpAccountingDocument.fileLabel} לכל חודש בנפרד (לא מסמך אחד לכמה חודשים).
                 </p>
               </div>
             </div>
@@ -927,7 +927,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                     className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
                     onClick={() => openAccountingModal(inv.id, inv.invoiceNumber || "")}
                   >
-                    העלה חשבונית מס קבלה
+                    העלה {followUpAccountingDocument.fileLabel}
                   </button>
                   ) : (
                     <span className="text-xs text-amber-700">{INVOICE_MONTH_NOT_CLOSED_ERROR}</span>
@@ -979,7 +979,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   }}
                   className="btn-primary inline-flex items-center justify-center gap-2 text-sm"
                 >
-                  העלה חשבונית מס קבלה לחודש
+                  העלה {followUpAccountingDocument.fileLabel} לחודש
                 </button>
               )}
               {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length === 0 && readyToSubmitCount > 0 && canSubmitForSelectedMonth && (
@@ -1007,7 +1007,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   }}
                   className="btn-secondary inline-flex items-center justify-center gap-2 text-sm"
                 >
-                  {artistStatus === "מורשה" ? "העלה בקשת תשלום לחודש" : "העלה קבלה לחודש"}
+                  העלה בקשת תשלום לחודש
                 </button>
               )}
               {showVoluntaryUpload && (
@@ -1061,9 +1061,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 <p className="text-sm text-gray-600 leading-relaxed">
                   במידה וחסר מידע במערכת, מוזמנים להעלות{" "}
                   <span className="font-medium text-gray-800">{voluntaryDocumentLabel}</span>
-                  {artistStatus === "מורשה"
-                    ? " (ולאחר קבלת התשלום — חשבונית מס קבלה)"
-                    : ""}
+                  {` (ולאחר קבלת התשלום — ${followUpAccountingDocument.fileLabel})`}
                   . יש לפרט עבור אילו אירועים מדובר — נבדוק אצלנו.
                 </p>
                 <button
@@ -1122,7 +1120,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                                     openAccountingModal(invId, inv?.invoiceNumber || "");
                                   }}
                                 >
-                                  העלה חשבונית מס קבלה
+                                  העלה {followUpAccountingDocument.fileLabel}
                                 </button>
                               )}
                             </div>

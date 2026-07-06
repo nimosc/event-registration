@@ -40,9 +40,11 @@ export async function POST(req: NextRequest) {
 
     const artistId = parseInt(session.id, 10);
     const taxStatus = await getArtistTaxStatus(artistId);
-    if (taxStatus !== "מורשה") {
-      return NextResponse.json({ error: "העלאת מסמך חשבונאי זמינה רק לעוסק מורשה" }, { status: 400 });
+    if (taxStatus !== "מורשה" && taxStatus !== "פטור") {
+      return NextResponse.json({ error: "יש לבחור סוג עוסק לפני הגשה" }, { status: 400 });
     }
+
+    const accountingDocument = getFollowUpAccountingDocument(taxStatus);
 
     const formData = await req.formData();
     const invoiceId = String(formData.get("invoiceId") ?? "").trim();
@@ -53,7 +55,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "חסר מזהה חשבונית" }, { status: 400 });
     }
     if (!file || file.size === 0) {
-      return NextResponse.json({ error: "חובה לצרף חשבונית מס קבלה" }, { status: 400 });
+      return NextResponse.json({ error: `חובה לצרף ${accountingDocument.fileLabel}` }, { status: 400 });
     }
     if (!invoiceNumber.trim()) {
       return NextResponse.json({ error: "חובה למלא מספר חשבונית / קבלה" }, { status: 400 });
@@ -81,7 +83,7 @@ export async function POST(req: NextRequest) {
       });
     }
     if (invoice.submissionStatus !== INVOICE_SUBMISSION_STATUS.PAYMENT_REQUEST) {
-      return NextResponse.json({ error: "ניתן להעלות חשבונית מס קבלה רק לאחר הגשת בקשת תשלום" }, { status: 400 });
+      return NextResponse.json({ error: `ניתן להעלות ${accountingDocument.fileLabel} רק לאחר הגשת בקשת תשלום` }, { status: 400 });
     }
 
     const orders = await getOrdersByIdsForInvoice(invoice.orderIds);
@@ -103,7 +105,7 @@ export async function POST(req: NextRequest) {
     }
     if (monthKeys.size > 1) {
       return NextResponse.json(
-        { error: "חשבונית מס קבלה ניתנת להגשה לחודש אחד בלבד — פנה למנהל" },
+        { error: `${accountingDocument.fileLabel} ניתנת להגשה לחודש אחד בלבד — פנה למנהל` },
         { status: 400 }
       );
     }
@@ -126,7 +128,7 @@ export async function POST(req: NextRequest) {
       invoiceNumber: invoiceNumber.trim(),
       extractedAmount: extracted?.amount ?? undefined,
     });
-    await updateInvoiceSubmissionStatus(invoiceId, getFollowUpAccountingDocument().submissionStatus);
+    await updateInvoiceSubmissionStatus(invoiceId, accountingDocument.submissionStatus);
 
     const subitemIds = await getArtistSubitemIdsForOrderIds(
       invoice.orderIds,

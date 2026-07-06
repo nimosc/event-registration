@@ -23,32 +23,28 @@ export type InvoiceSubmissionStatus =
 
 export type InitialInvoiceDocumentKind = "accounting" | "payment_request";
 
-export function getInitialDocumentForTaxStatus(taxStatus: ArtistTaxStatus) {
-  if (taxStatus === "פטור") {
-    return {
-      kind: "accounting" as const,
-      fileLabel: "קבלה",
-      fileHint: "עוסק פטור מגיש קבלה כמסמך חשבונאי",
-      submissionStatus: INVOICE_SUBMISSION_STATUS.ACCOUNTING,
-      subitemInvoiceStatus: SUBITEM_INVOICE_STATUS.SUBMITTED,
-      extractFromFile: true,
-    };
-  }
+/** מסמך חשבונאי לפי סוג עוסק: עוסק פטור — קבלה, עוסק מורשה — חשבונית מס קבלה */
+export function getAccountingDocumentLabel(taxStatus: ArtistTaxStatus): string {
+  return taxStatus === "פטור" ? "קבלה" : "חשבונית מס קבלה";
+}
 
+export function getInitialDocumentForTaxStatus(taxStatus: ArtistTaxStatus) {
+  const accountingLabel = getAccountingDocumentLabel(taxStatus);
   return {
     kind: "payment_request" as const,
     fileLabel: "בקשת תשלום",
-    fileHint: "עוסק מורשה מגיש תחילה בקשת תשלום. לאחר קבלת התשלום יש להעלות חשבונית מס קבלה",
+    fileHint: `תחילה מגישים בקשת תשלום. לאחר קבלת התשלום יש להעלות ${accountingLabel}`,
     submissionStatus: INVOICE_SUBMISSION_STATUS.PAYMENT_REQUEST,
     subitemInvoiceStatus: SUBITEM_INVOICE_STATUS.PAYMENT_REQUEST,
     extractFromFile: true,
   };
 }
 
-export function getFollowUpAccountingDocument() {
+export function getFollowUpAccountingDocument(taxStatus: ArtistTaxStatus) {
+  const accountingLabel = getAccountingDocumentLabel(taxStatus);
   return {
-    fileLabel: "חשבונית מס קבלה",
-    fileHint: "לאחר קבלת התשלום, העלה את חשבונית המס קבלה לחודש הרלוונטי — הרשומה הקיימת תתעדכן",
+    fileLabel: accountingLabel,
+    fileHint: `לאחר קבלת התשלום, העלה את ${accountingLabel} לחודש הרלוונטי — הרשומה הקיימת תתעדכן`,
     submissionStatus: INVOICE_SUBMISSION_STATUS.ACCOUNTING,
     extractFromFile: true,
     validateAgainstPaymentRequest: true,
@@ -57,7 +53,7 @@ export function getFollowUpAccountingDocument() {
 
 export function getSubmissionStatusDisplay(status: string): string {
   if (status === INVOICE_SUBMISSION_STATUS.PAYMENT_REQUEST) {
-    return "הגשת בקשת תשלום — צריך להגיש חשבונית מס קבלה";
+    return "הגשת בקשת תשלום — צריך להגיש מסמך חשבונאי";
   }
   if (status === INVOICE_SUBMISSION_STATUS.ACCOUNTING) {
     return "הוגש מסמך חשבונאי";
@@ -88,7 +84,7 @@ export function isSubitemInvoiceBlocked(status: string): boolean {
 
 export function getSubitemInvoiceStatusDisplay(status: string): string {
   if (isSubitemAwaitingAccounting(status)) {
-    return "הגשת בקשת תשלום — צריך להגיש חשבונית מס קבלה";
+    return "הגשת בקשת תשלום — צריך להגיש מסמך חשבונאי";
   }
   if (isSubitemInvoiceComplete(status)) {
     return SUBITEM_INVOICE_STATUS.SUBMITTED;
