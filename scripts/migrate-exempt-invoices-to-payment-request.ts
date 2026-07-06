@@ -15,6 +15,11 @@
  * Dry run by default. Pass --apply to perform the changes.
  *   npx tsx scripts/migrate-exempt-invoices-to-payment-request.ts          # dry run
  *   npx tsx scripts/migrate-exempt-invoices-to-payment-request.ts --apply  # execute
+ *
+ * OPERATOR NOTE: if a `FAILED #<id>` line appears during --apply, that item may be
+ * half-migrated (e.g. file copied to the payment-request column but status not reset).
+ * A re-run will SKIP such items (they now have a payment-request file) — inspect and
+ * fix any FAILED item manually in Monday.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
