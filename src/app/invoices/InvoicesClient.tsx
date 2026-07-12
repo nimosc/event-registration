@@ -69,8 +69,8 @@ const HEBREW_MONTHS: Record<number, string> = {
   9: "ספטמבר", 10: "אוקטובר", 11: "נובמבר", 12: "דצמבר",
 };
 
-const FIRST_EVENT_PAY_PATUR = 1000;
-const ADDITIONAL_EVENT_PAY_PATUR = 800;
+/* תעריף לפעילות: עוסק מורשה — 1,000 ₪ (כולל מע"מ); עוסק פטור — 850 ₪ */
+const PAY_PATUR = 850;
 const PAY_MORESH = 1000;
 
 function invoiceAmountsDiffer(expected: number, reported: number): boolean {
@@ -405,22 +405,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     const byId: Record<string, number> = {};
     if (!artistStatus) return { incomeBySubitemId: byId };
 
-    const byMonth = new Map<string, Registration[]>();
+    const perActivity = artistStatus === "פטור" ? PAY_PATUR : PAY_MORESH;
     for (const reg of filtered) {
-      const key = parseMonthKey(reg.date) || "none";
-      if (!byMonth.has(key)) byMonth.set(key, []);
-      byMonth.get(key)!.push(reg);
-    }
-    for (const regs of byMonth.values()) {
-      const sorted = [...regs].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-      for (let i = 0; i < sorted.length; i++) {
-        const amount = artistStatus === "פטור"
-          ? i === 0
-            ? FIRST_EVENT_PAY_PATUR
-            : ADDITIONAL_EVENT_PAY_PATUR
-          : PAY_MORESH;
-        byId[sorted[i].subitemId] = amount;
-      }
+      byId[reg.subitemId] = perActivity;
     }
     return { incomeBySubitemId: byId };
   }, [filtered, artistStatus]);
