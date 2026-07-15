@@ -158,8 +158,9 @@ export async function POST(req: NextRequest) {
     ]
       .filter(Boolean)
       .join("\n");
-    resolvedAmount = amount;
-    resolvedActualAmount = actualAmount;
+    // הגשה ידנית: אין למערכת סכום מחושב — העמודה נכתבת 0, והסכום שהוזן נשמר כמדווח
+    resolvedAmount = 0;
+    resolvedActualAmount = actualAmount ?? amount;
   } else {
     if (!orderIds.length || !amount) {
       return NextResponse.json({ error: "חסרים שדות חובה" }, { status: 400 });
@@ -261,7 +262,7 @@ export async function POST(req: NextRequest) {
       ? INVOICE_SUBMISSION_TYPE.REVIEW
       : INVOICE_SUBMISSION_TYPE.MONTHLY,
     matchStatus:
-      voluntarySubmission || invoiceAmountsMatch(reportedAmount, resolvedAmount)
+      !voluntarySubmission && invoiceAmountsMatch(reportedAmount, resolvedAmount)
         ? INVOICE_MATCH_STATUS.OK
         : INVOICE_MATCH_STATUS.REQUEST_DIFFERENT,
     bankDetails,

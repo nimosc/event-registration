@@ -1805,7 +1805,8 @@ export async function createInvoiceItem(params: {
       ? `${params.monthKey.trim()}-01`
       : params.eventDate;
   if (invoiceDate) colValues["date"] = { date: invoiceDate };
-  if (params.amount) colValues[INVOICE_AMOUNT_EXPECTED_COLUMN_ID] = params.amount;
+  // 0 נכתב במפורש (הגשה ידנית — אין סכום מחושב); רק null/undefined מדולגים
+  if (params.amount != null) colValues[INVOICE_AMOUNT_EXPECTED_COLUMN_ID] = params.amount;
   if (params.extractedAmount != null) colValues[INVOICE_AMOUNT_EXTRACTED_COLUMN_ID] = params.extractedAmount;
   const reportedAmountToSave = params.actualAmount ?? params.amount;
   if (reportedAmountToSave != null) {
