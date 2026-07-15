@@ -273,44 +273,77 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     [customAmountEnabled, customAmountNote, customAmountValue, extractedActualAmount, initialDocumentConfig?.fileLabel, invoiceFile, missingBankFields]
   );
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const cacheKey = `invoices-page-cache-v1:${user.id}`;
+
+  const fetchData = useCallback(async (background?: unknown) => {
+    // background === true רק מהרענון-ברקע של הקאש; לחיצות כפתור מעבירות אירוע
+    if (background !== true) setLoading(true);
     setError(null);
     try {
-      const invRes = await fetch("/api/invoices");
-      if (invRes.ok) {
-        const invData = await invRes.json();
-        setInvoices((invData.invoices ?? []) as InvoiceDto[]);
-      }
-
-      const regRes = await fetch("/api/my-registrations");
+      const [invRes, regRes] = await Promise.all([
+        fetch("/api/invoices"),
+        fetch("/api/my-registrations"),
+      ]);
+      const invData = invRes.ok ? await invRes.json() : null;
       const regData = await regRes.json();
       if (!regRes.ok) {
         setError(regData.error || "שגיאה בטעינת נתונים");
         return;
       }
 
+      const invoicesList = (invData?.invoices ?? []) as InvoiceDto[];
+      if (invData) setInvoices(invoicesList);
       const sortedRegs = [...(regData.registrations ?? [])].sort((a: Registration, b: Registration) =>
         (a.date || "").localeCompare(b.date || "")
       );
-      setRegistrations(sortedRegs);
-      setArtistStatus(regData.artistStatus ?? "");
-      setArtistBankDetails({
+      const bank = {
         beneficiaryName: regData.beneficiaryName || "",
         bankCode: regData.bankCode || "",
         bankBranch: regData.bankBranch || "",
         bankAccount: regData.bankAccount || "",
-      });
+      };
+      setRegistrations(sortedRegs);
+      setArtistStatus(regData.artistStatus ?? "");
+      setArtistBankDetails(bank);
+      try {
+        sessionStorage.setItem(
+          cacheKey,
+          JSON.stringify({
+            invoices: invoicesList,
+            registrations: sortedRegs,
+            artistStatus: regData.artistStatus ?? "",
+            bank,
+          })
+        );
+      } catch {
+        // אחסון מלא/חסום — הקאש אופציונלי
+      }
     } catch {
       setError("שגיאת רשת.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cacheKey]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    // ציור מיידי מהביקור הקודם (אם קיים), ואז רענון מהשרת ברקע
+    let hydrated = false;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const c = JSON.parse(cached);
+        setInvoices(c.invoices ?? []);
+        setRegistrations(c.registrations ?? []);
+        setArtistStatus(c.artistStatus ?? "");
+        if (c.bank) setArtistBankDetails(c.bank);
+        setLoading(false);
+        hydrated = true;
+      }
+    } catch {
+      // קאש פגום — טעינה רגילה
+    }
+    void fetchData(hydrated);
+  }, [fetchData, cacheKey]);
 
   useEffect(() => {
     if (!submittingInvoice) {

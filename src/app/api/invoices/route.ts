@@ -60,7 +60,10 @@ export async function GET() {
       }
     });
   if (syncTasks.length > 0) {
-    await Promise.all(syncTasks);
+    // Subitem sync is bookkeeping — finish it after the response is sent.
+    after(async () => {
+      await Promise.all(syncTasks);
+    });
   }
 
   return NextResponse.json({ invoices });

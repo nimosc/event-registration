@@ -88,8 +88,11 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
   const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthKey());
   const [unregisteringId, setUnregisteringId] = useState<string | null>(null);
 
-  const fetchRegistrations = useCallback(async () => {
-    setLoading(true);
+  const cacheKey = `my-registrations-cache-v1:${user.id}`;
+
+  const fetchRegistrations = useCallback(async (background?: unknown) => {
+    // background === true רק מהרענון-ברקע של הקאש; לחיצות כפתור מעבירות אירוע
+    if (background !== true) setLoading(true);
     setError(null);
     try {
       const response = await fetch("/api/my-registrations");
@@ -102,16 +105,33 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
         (a.date || "").localeCompare(b.date || "")
       );
       setRegistrations(sorted);
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(sorted));
+      } catch {
+        // אחסון מלא/חסום — הקאש אופציונלי
+      }
     } catch {
       setError("שגיאת רשת.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cacheKey]);
 
   useEffect(() => {
-    fetchRegistrations();
-  }, [fetchRegistrations]);
+    // ציור מיידי מהביקור הקודם (אם קיים), ואז רענון מהשרת ברקע
+    let hydrated = false;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        setRegistrations(JSON.parse(cached));
+        setLoading(false);
+        hydrated = true;
+      }
+    } catch {
+      // קאש פגום — טעינה רגילה
+    }
+    void fetchRegistrations(hydrated);
+  }, [fetchRegistrations, cacheKey]);
 
   const handleUnregister = useCallback(async (reg: Registration) => {
     if (!confirm(`לבטל את המועמדות להזמנה "${reg.orderName}"?`)) return;
