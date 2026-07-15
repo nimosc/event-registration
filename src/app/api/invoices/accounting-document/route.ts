@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
+import { sha256OfFile, verifyExtractionToken } from "@/lib/extractionToken";
 import {
   getArtistTaxStatus,
   getColumnValue,
@@ -42,42 +43,59 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
 
     const artistId = parseInt(session.id, 10);
-    const taxStatus = await getArtistTaxStatus(artistId);
+
+    const formData = await req.formData();
+    const invoiceId = String(formData.get("invoiceId") ?? "").trim();
+    const file = formData.get("file") as File | null;
+    const invoiceNumber = (formData.get("invoiceNumber") as string) || "";
+    const extractionToken = (formData.get("extractionToken") as string) || "";
+
+    if (!invoiceId) {
+      return NextResponse.json({ error: "חסר מזהה חשבונית" }, { status: 400 });
+    }
+    if (!file || file.size === 0) {
+      return NextResponse.json({ error: "חובה לצרף מסמך חשבונאי" }, { status: 400 });
+    }
+    if (!invoiceNumber.trim()) {
+      return NextResponse.json({ error: "חובה למלא מספר חשבונית / קבלה" }, { status: 400 });
+    }
+
+    // Kick off independent work in parallel: Monday reads + extraction resolution.
+    const taxStatusPromise = getArtistTaxStatus(artistId);
+    const invoicePromise = getInvoiceItemForArtist(invoiceId, session.id);
+    const fileHash = await sha256OfFile(file);
+    const signedExtraction = extractionToken
+      ? verifyExtractionToken(extractionToken, fileHash)
+      : null;
+    const extractionPromise = signedExtraction ? null : extractInvoiceDataWithTimeout(file);
+
+    const taxStatus = await taxStatusPromise;
     if (taxStatus !== "מורשה" && taxStatus !== "פטור") {
       return NextResponse.json({ error: "יש לבחור סוג עוסק לפני הגשה" }, { status: 400 });
     }
 
     const accountingDocument = getFollowUpAccountingDocument(taxStatus);
 
-    const formData = await req.formData();
-    const invoiceId = String(formData.get("invoiceId") ?? "").trim();
-    const file = formData.get("file") as File | null;
-    const invoiceNumber = (formData.get("invoiceNumber") as string) || "";
-
-    if (!invoiceId) {
-      return NextResponse.json({ error: "חסר מזהה חשבונית" }, { status: 400 });
-    }
-    if (!file || file.size === 0) {
-      return NextResponse.json({ error: `חובה לצרף ${accountingDocument.fileLabel}` }, { status: 400 });
-    }
-    if (!invoiceNumber.trim()) {
-      return NextResponse.json({ error: "חובה למלא מספר חשבונית / קבלה" }, { status: 400 });
-    }
-
-    const invoice = await getInvoiceItemForArtist(invoiceId, session.id);
+    const invoice = await invoicePromise;
     if (!invoice) {
       return NextResponse.json({ error: "הרשומה לא נמצאה" }, { status: 404 });
     }
     if (invoice.submissionStatus === INVOICE_SUBMISSION_STATUS.ACCOUNTING) {
-      const subitemIds = await getArtistSubitemIdsForOrderIds(
-        invoice.orderIds,
-        artistId,
-        session.name
-      );
-      if (subitemIds.length > 0) {
-        await linkSubitemsToInvoice(subitemIds, invoiceId);
-        await markSubitemsInvoiceSubmitted(subitemIds);
-      }
+      after(async () => {
+        try {
+          const subitemIds = await getArtistSubitemIdsForOrderIds(
+            invoice.orderIds,
+            artistId,
+            session.name
+          );
+          if (subitemIds.length > 0) {
+            await linkSubitemsToInvoice(subitemIds, invoiceId);
+            await markSubitemsInvoiceSubmitted(subitemIds);
+          }
+        } catch (err) {
+          console.error(`post-submit subitem sync failed for invoice ${invoiceId}:`, err);
+        }
+      });
       return NextResponse.json({
         success: true,
         invoiceId,
@@ -114,7 +132,7 @@ export async function POST(req: NextRequest) {
     }
 
     const expectedAmount = invoice.reportedAmount || invoice.actualAmount || invoice.amount;
-    const extracted = await extractInvoiceDataWithTimeout(file);
+    const extracted = signedExtraction ?? (extractionPromise ? await extractionPromise : null);
     // Typo guard: a declared number that contradicts the file still blocks.
     const numberError = validateExtractedAgainstExpected({
       extracted,
@@ -130,26 +148,36 @@ export async function POST(req: NextRequest) {
     const receiptAmountMismatch =
       extracted?.amount != null && !invoiceAmountsMatch(extracted.amount, expectedAmount);
 
+    // Upload first (the completed status must never exist without the file),
+    // then the independent metadata writes run in parallel.
     await uploadFileToInvoiceColumn(invoiceId, INVOICE_ACCOUNTING_FILE_COLUMN_ID, file, file.name);
-    await updateInvoiceAccountingDetails(invoiceId, {
-      invoiceNumber: invoiceNumber.trim(),
-      extractedAmount: extracted?.amount ?? undefined,
+    await Promise.all([
+      updateInvoiceAccountingDetails(invoiceId, {
+        invoiceNumber: invoiceNumber.trim(),
+        extractedAmount: extracted?.amount ?? undefined,
+      }),
+      updateInvoiceSubmissionStatus(invoiceId, accountingDocument.submissionStatus),
+      receiptAmountMismatch
+        ? updateInvoiceMatchStatus(invoiceId, INVOICE_MATCH_STATUS.RECEIPT_DIFFERENT)
+        : Promise.resolve(),
+    ]);
+
+    // Subitem bookkeeping runs after the response is sent.
+    after(async () => {
+      try {
+        const subitemIds = await getArtistSubitemIdsForOrderIds(
+          invoice.orderIds,
+          artistId,
+          session.name
+        );
+        if (subitemIds.length > 0) {
+          await linkSubitemsToInvoice(subitemIds, invoiceId);
+          await markSubitemsInvoiceSubmitted(subitemIds);
+        }
+      } catch (err) {
+        console.error(`post-submit subitem sync failed for invoice ${invoiceId}:`, err);
+      }
     });
-    await updateInvoiceSubmissionStatus(invoiceId, accountingDocument.submissionStatus);
-    if (receiptAmountMismatch) {
-      await updateInvoiceMatchStatus(invoiceId, INVOICE_MATCH_STATUS.RECEIPT_DIFFERENT);
-    }
-
-    const subitemIds = await getArtistSubitemIdsForOrderIds(
-      invoice.orderIds,
-      artistId,
-      session.name
-    );
-
-    if (subitemIds.length > 0) {
-      await linkSubitemsToInvoice(subitemIds, invoiceId);
-      await markSubitemsInvoiceSubmitted(subitemIds);
-    }
 
     return NextResponse.json({
       success: true,

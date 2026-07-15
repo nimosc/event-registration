@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { extractInvoiceData, isInvoiceExtractAvailable } from "@/lib/invoiceExtract";
+import { sha256OfFile, signExtractionToken } from "@/lib/extractionToken";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -25,10 +26,17 @@ export async function POST(req: NextRequest) {
 
   try {
     const parsed = await extractInvoiceData(file);
-    return NextResponse.json({
+    const fields = {
       receiptNumber: parsed.receiptNumber ?? null,
       amount: parsed.amount != null ? Number(parsed.amount) : null,
       description: parsed.description ?? null,
+    };
+    // Signed token lets the submit route reuse this extraction for the same file
+    // instead of running the AI again (saves 4-8s on submit).
+    const fileHash = await sha256OfFile(file);
+    return NextResponse.json({
+      ...fields,
+      extractionToken: signExtractionToken(fields, fileHash),
     });
   } catch (err) {
     console.error("Invoice extract error:", err);

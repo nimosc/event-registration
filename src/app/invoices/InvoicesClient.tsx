@@ -224,6 +224,8 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   const [submittingSeconds, setSubmittingSeconds] = useState(0);
   const [invoiceSuccess, setInvoiceSuccess] = useState<string | null>(null);
   const [extractingFile, setExtractingFile] = useState(false);
+  const [extractionToken, setExtractionToken] = useState("");
+  const [accountingExtractionToken, setAccountingExtractionToken] = useState("");
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [customAmountEnabled, setCustomAmountEnabled] = useState(false);
   const [customAmountValue, setCustomAmountValue] = useState("");
@@ -412,6 +414,17 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     return { incomeBySubitemId: byId };
   }, [filtered, artistStatus]);
 
+  // אזהרת דפדפן אם סוגרים את הטאב בזמן שהגשה עדיין נשלחת
+  useEffect(() => {
+    if (!submittingInvoice && !submittingAccounting) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [submittingInvoice, submittingAccounting]);
+
   const handleTaxStatusChange = useCallback(async (taxStatus: "מורשה" | "פטור") => {
     if (taxStatus === artistStatus || savingTaxStatus) return;
     setSavingTaxStatus(true);
@@ -438,6 +451,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
 
   const handleFileChange = useCallback(async (file: File | null) => {
     setInvoiceFile(file);
+    setExtractionToken("");
     if (!file || !initialDocumentConfig?.extractFromFile) return;
     setExtractingFile(true);
     try {
@@ -446,6 +460,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       const res = await fetch("/api/invoices/extract", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) return;
+      if (data.extractionToken) setExtractionToken(data.extractionToken);
       setInvoiceForm((f) => ({
         ...f,
         invoiceNumber: data.receiptNumber || f.invoiceNumber,
@@ -477,6 +492,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     setAccountingFile(file);
     setAccountingExtractedAmount(null);
     setAccountingExtractedNumber("");
+    setAccountingExtractionToken("");
     if (!file || !followUpAccountingDocument.extractFromFile) return;
     setExtractingAccountingFile(true);
     try {
@@ -485,6 +501,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       const res = await fetch("/api/invoices/extract", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) return;
+      if (data.extractionToken) setAccountingExtractionToken(data.extractionToken);
       if (data.receiptNumber) {
         setAccountingExtractedNumber(data.receiptNumber);
         if (!accountingInvoiceNumber.trim()) {
@@ -569,6 +586,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       if (accountingInvoiceNumber.trim()) {
         fd.append("invoiceNumber", accountingInvoiceNumber.trim());
       }
+      if (accountingExtractionToken) {
+        fd.append("extractionToken", accountingExtractionToken);
+      }
       const res = await fetch("/api/invoices/accounting-document", { method: "POST", body: fd });
       let data: { error?: string } = {};
       try {
@@ -589,13 +609,14 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setAccountingExtractedNumber("");
       setInvoiceSuccess(`הרשומה עודכנה — ${followUpAccountingDocument.fileLabel} הוגשה בהצלחה`);
       setTimeout(() => setInvoiceSuccess(null), 5000);
-      await fetchData();
+      void fetchData(); // רענון ברקע — לא מעכב את סגירת המודל
     } catch {
       setError("שגיאת רשת.");
     } finally {
       setSubmittingAccounting(false);
     }
   }, [
+    accountingExtractionToken,
     accountingFile,
     accountingInvoice,
     accountingInvoiceId,
@@ -674,6 +695,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       fd.append("invoiceNumber", invoiceForm.invoiceNumber);
       fd.append("description", invoiceForm.description);
       fd.append("file", invoiceFile, invoiceFile.name);
+      if (extractionToken) fd.append("extractionToken", extractionToken);
 
       const res = await fetch("/api/invoices", { method: "POST", body: fd });
       const data = await res.json();
@@ -687,6 +709,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setVoluntaryAmount("");
       setInvoiceForm({ beneficiaryName: "", bankCode: "", bankBranch: "", bankAccount: "", invoiceNumber: "", description: "" });
       setInvoiceFile(null);
+      setExtractionToken("");
       setExtractedActualAmount(null);
       setInvoiceSuccess(
         `המסמך הוגש לבדיקה — ${amount.toLocaleString("he-IL")} ₪. נבדוק את הפרטים ונעדכן.`
@@ -698,7 +721,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         bankAccount: invoiceForm.bankAccount,
       });
       setTimeout(() => setInvoiceSuccess(null), 5000);
-      await fetchData();
+      void fetchData(); // רענון ברקע
     } catch {
       setError("שגיאת רשת.");
     } finally {
@@ -707,6 +730,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, [
     eventsDescription,
     extractedActualAmount,
+    extractionToken,
     fetchData,
     hasCompleteBankDetails,
     initialDocumentConfig?.fileLabel,
@@ -776,6 +800,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       fd.append("amountNote", customAmountNote);
       fd.append("description", invoiceForm.description);
       if (invoiceFile) fd.append("file", invoiceFile, invoiceFile.name);
+      if (extractionToken) fd.append("extractionToken", extractionToken);
 
       const res = await fetch("/api/invoices", { method: "POST", body: fd });
       const data = await res.json();
@@ -787,6 +812,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setShowMonthInvoiceModal(false);
       setInvoiceForm({ beneficiaryName: "", bankCode: "", bankBranch: "", bankAccount: "", invoiceNumber: "", description: "" });
       setInvoiceFile(null);
+      setExtractionToken("");
       setCustomAmountEnabled(false);
       setCustomAmountValue("");
       setCustomAmountNote("");
@@ -803,13 +829,13 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         bankAccount: invoiceForm.bankAccount,
       });
       setTimeout(() => setInvoiceSuccess(null), 5000);
-      await fetchData();
+      void fetchData(); // רענון ברקע
     } catch {
       setError("שגיאת רשת.");
     } finally {
       setSubmittingInvoice(false);
     }
-  }, [customAmountEnabled, customAmountNote, customAmountValue, fetchData, hasCompleteBankDetails, initialDocumentConfig, invoiceFile, invoiceForm, missingBankFields]);
+  }, [customAmountEnabled, customAmountNote, customAmountValue, extractionToken, fetchData, hasCompleteBankDetails, initialDocumentConfig, invoiceFile, invoiceForm, missingBankFields]);
 
   return (
     <div className="min-h-screen bg-gray-50">

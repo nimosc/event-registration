@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
+import { sha256OfFile, verifyExtractionToken } from "@/lib/extractionToken";
+import type { ExtractedInvoiceFields } from "@/lib/invoiceValidation";
 import {
   createInvoiceItem,
   getArtistInvoices,
@@ -69,12 +71,6 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
 
   const artistId = parseInt(session.id, 10);
-  const taxStatus = await getArtistTaxStatus(artistId);
-  if (taxStatus !== "מורשה" && taxStatus !== "פטור") {
-    return NextResponse.json({ error: "יש לבחור סוג עוסק לפני הגשה" }, { status: 400 });
-  }
-
-  const documentConfig = getInitialDocumentForTaxStatus(taxStatus);
 
   const formData = await req.formData();
   const voluntarySubmission = formData.get("voluntarySubmission") === "true";
@@ -94,6 +90,7 @@ export async function POST(req: NextRequest) {
   const eventDate = (formData.get("eventDate") as string) || "";
   const monthLabel = (formData.get("monthLabel") as string) || "";
   const monthKey = (formData.get("monthKey") as string) || "";
+  const extractionToken = (formData.get("extractionToken") as string) || "";
   const file = formData.get("file") as File | null;
 
   const resolvedMonthKey = monthKey.trim() || parseInvoiceMonthKey(eventDate);
@@ -103,11 +100,33 @@ export async function POST(req: NextRequest) {
   }
 
   if (!file || file.size === 0) {
-    return NextResponse.json({ error: `חובה לצרף ${documentConfig.fileLabel}` }, { status: 400 });
+    return NextResponse.json({ error: "חובה לצרף בקשת תשלום" }, { status: 400 });
   }
   if (!beneficiaryName.trim() || !bankCode.trim() || !bankBranch.trim() || !bankAccount.trim()) {
     return NextResponse.json({ error: "חובה למלא פרטי חשבון בנק" }, { status: 400 });
   }
+
+  // Kick off all independent work in parallel: Monday reads + extraction resolution.
+  const taxStatusPromise = getArtistTaxStatus(artistId);
+  const existingInvoicesPromise = voluntarySubmission ? null : getArtistInvoices(session.id);
+  const ordersPromise =
+    voluntarySubmission || orderIds.length === 0 ? null : getOrdersByIdsForInvoice(orderIds);
+
+  // A valid signed token (from /api/invoices/extract) lets us reuse the extraction
+  // already performed on this exact file instead of running the AI again.
+  const fileHash = await sha256OfFile(file);
+  const signedExtraction = extractionToken
+    ? verifyExtractionToken(extractionToken, fileHash)
+    : null;
+  const extractionPromise: Promise<ExtractedInvoiceFields | null> | null = signedExtraction
+    ? null
+    : extractInvoiceDataWithTimeout(file);
+
+  const taxStatus = await taxStatusPromise;
+  if (taxStatus !== "מורשה" && taxStatus !== "פטור") {
+    return NextResponse.json({ error: "יש לבחור סוג עוסק לפני הגשה" }, { status: 400 });
+  }
+  const documentConfig = getInitialDocumentForTaxStatus(taxStatus);
 
   let resolvedOrderIds = orderIds;
   let resolvedSubitemIds = subitemIds;
@@ -146,7 +165,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "יש לבחור לפחות אירוע אחד" }, { status: 400 });
     }
 
-    const existing = await getArtistInvoices(session.id);
+    const existing = (await existingInvoicesPromise) ?? [];
     const existingOrderIds = new Set(existing.flatMap((inv) => inv.orderIds));
     const duplicates = orderIds.filter((id) => existingOrderIds.has(id));
     if (duplicates.length > 0) {
@@ -156,7 +175,7 @@ export async function POST(req: NextRequest) {
     const requestedOrderIds = new Set(orderIds);
     const eligibleOrderIds = new Set<string>();
     const eligibleSubitemIds = new Set<string>();
-    const orders = await getOrdersByIdsForInvoice(orderIds);
+    const orders = (await ordersPromise) ?? [];
 
     for (const order of orders) {
       if (!requestedOrderIds.has(order.id)) continue;
@@ -209,7 +228,7 @@ export async function POST(req: NextRequest) {
   const reportedAmount = resolvedActualAmount ?? resolvedAmount;
 
   const extractedInvoice = documentConfig.extractFromFile
-    ? await extractInvoiceDataWithTimeout(file)
+    ? signedExtraction ?? (extractionPromise ? await extractionPromise : null)
     : null;
   const extractedAmount = extractedInvoice?.amount ?? undefined;
 
@@ -261,45 +280,53 @@ export async function POST(req: NextRequest) {
     documentConfig.kind === "payment_request"
       ? INVOICE_PAYMENT_REQUEST_FILE_COLUMN_ID
       : INVOICE_ACCOUNTING_FILE_COLUMN_ID;
-  await uploadFileToInvoiceColumn(result.id, fileColumnId, file, file.name);
+  const bankCheckPromise =
+    bankDetails || beneficiaryName || bankCode || bankBranch || bankAccount
+      ? getArtistBankDetailsFields(session.id)
+      : null;
+  const [, current] = await Promise.all([
+    uploadFileToInvoiceColumn(result.id, fileColumnId, file, file.name),
+    bankCheckPromise,
+  ]);
 
-  let shouldUpdateBankDetails = false;
-  if (bankDetails || beneficiaryName || bankCode || bankBranch || bankAccount) {
-    const current = await getArtistBankDetailsFields(session.id);
-    shouldUpdateBankDetails =
-      current.legacy !== bankDetails ||
+  const shouldUpdateBankDetails = current
+    ? current.legacy !== bankDetails ||
       current.beneficiaryName !== beneficiaryName ||
       current.bankCode !== bankCode ||
       current.bankBranch !== bankBranch ||
-      current.bankAccount !== bankAccount;
-  }
+      current.bankAccount !== bankAccount
+    : false;
 
-  const postCreateTasks: Array<Promise<unknown>> = [];
-  if (resolvedSubitemIds.length > 0) {
-    postCreateTasks.push(linkSubitemsToInvoice(resolvedSubitemIds, result.id));
-    if (documentConfig.subitemInvoiceStatus) {
+  // Non-critical writes run after the response is sent (kept alive by the platform).
+  after(async () => {
+    const postCreateTasks: Array<Promise<unknown>> = [];
+    if (resolvedSubitemIds.length > 0) {
+      postCreateTasks.push(linkSubitemsToInvoice(resolvedSubitemIds, result.id));
+      if (documentConfig.subitemInvoiceStatus) {
+        postCreateTasks.push(
+          updateSubitemsInvoiceStatus(resolvedSubitemIds, documentConfig.subitemInvoiceStatus)
+        );
+      }
+    }
+    if (shouldUpdateBankDetails) {
       postCreateTasks.push(
-        updateSubitemsInvoiceStatus(resolvedSubitemIds, documentConfig.subitemInvoiceStatus)
+        updateArtistBankDetails(
+          session.id,
+          bankDetails,
+          beneficiaryName,
+          bankCode,
+          bankBranch,
+          bankAccount
+        )
       );
     }
-  }
-
-  if (shouldUpdateBankDetails) {
-    postCreateTasks.push(
-      updateArtistBankDetails(
-        session.id,
-        bankDetails,
-        beneficiaryName,
-        bankCode,
-        bankBranch,
-        bankAccount
-      )
-    );
-  }
-
-  if (postCreateTasks.length > 0) {
-    await Promise.all(postCreateTasks);
-  }
+    const results = await Promise.allSettled(postCreateTasks);
+    for (const r of results) {
+      if (r.status === "rejected") {
+        console.error(`post-submit task failed for invoice ${result.id}:`, r.reason);
+      }
+    }
+  });
 
   return NextResponse.json({
     invoiceId: result.id,

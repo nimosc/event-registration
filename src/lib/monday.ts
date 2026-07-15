@@ -1845,27 +1845,33 @@ export async function createInvoiceItem(params: {
 
   const invoiceId = createData.create_item.id;
 
-  await mondayQuery(
-    `mutation {
-      change_column_value(
-        board_id: ${BOARDS.INVOICES}, item_id: ${invoiceId},
-        column_id: "${INVOICE_ARTIST_RELATION_COLUMN_ID}",
-        value: ${JSON.stringify(JSON.stringify({ item_ids: [parseInt(params.artistId, 10)] }))}
-      ) { id }
-    }`
-  );
-
-  if (params.orderIds.length > 0) {
-    await mondayQuery(
+  const relationMutations: Array<Promise<unknown>> = [
+    mondayQuery(
       `mutation {
         change_column_value(
           board_id: ${BOARDS.INVOICES}, item_id: ${invoiceId},
-          column_id: "${INVOICE_ORDER_RELATION_COLUMN_ID}",
-          value: ${JSON.stringify(JSON.stringify({ item_ids: params.orderIds.map(Number) }))}
+          column_id: "${INVOICE_ARTIST_RELATION_COLUMN_ID}",
+          value: ${JSON.stringify(JSON.stringify({ item_ids: [parseInt(params.artistId, 10)] }))}
         ) { id }
       }`
+    ),
+  ];
+
+  if (params.orderIds.length > 0) {
+    relationMutations.push(
+      mondayQuery(
+        `mutation {
+          change_column_value(
+            board_id: ${BOARDS.INVOICES}, item_id: ${invoiceId},
+            column_id: "${INVOICE_ORDER_RELATION_COLUMN_ID}",
+            value: ${JSON.stringify(JSON.stringify({ item_ids: params.orderIds.map(Number) }))}
+          ) { id }
+        }`
+      )
     );
   }
+
+  await Promise.all(relationMutations);
 
   return { id: invoiceId };
 }
