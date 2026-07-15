@@ -973,10 +973,17 @@ export async function updateArtistTaxStatus(
 // ─── Query: Get open orders ───────────────────────────────────────────────────
 
 export async function getOpenOrders() {
+  // Server-side status filter — label indices on the ORDERS board status column
+  // (color_mm18ej76): 18="בתהליך שיבוץ", 2="סגירת קבלת מועמדויות", 1="הסתיים השיבוץ".
+  // Matches the route's post-filter exactly, but avoids pulling ~100 items with
+  // all their subitems just to keep ~20 (was the main cost of /api/orders).
   const query = `
     query {
       boards(ids: [${BOARDS.ORDERS}]) {
-        items_page(limit: 100) {
+        items_page(
+          limit: 100,
+          query_params: { rules: [{ column_id: "color_mm18ej76", compare_value: [18, 2, 1], operator: any_of }] }
+        ) {
           items {
             id
             name

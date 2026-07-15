@@ -73,8 +73,11 @@ export async function GET() {
       return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
     }
 
-    // Refresh role from Monday on every page load so changes take effect immediately
-    const liveRole = await getLiveArtistRole(session.id);
+    // Role refresh and the orders fetch are independent — run them in parallel
+    const [liveRole, items] = await Promise.all([
+      getLiveArtistRole(session.id),
+      getOpenOrders(),
+    ]);
     let roleRefreshed = false;
     if (liveRole && liveRole !== session.role) {
       console.log(`[/api/orders] role changed ${session.role} → ${liveRole}, refreshing JWT`);
@@ -82,9 +85,7 @@ export async function GET() {
       roleRefreshed = true;
     }
 
-    console.log(`[/api/orders] session ok (${session.name}, role: ${session.role}), fetching orders...`);
-
-    const items = await getOpenOrders();
+    console.log(`[/api/orders] session ok (${session.name}, role: ${session.role})`);
     console.log(`[/api/orders] got ${items.length} items from Monday in ${Date.now() - start}ms`);
     const artistId = parseInt(session.id, 10);
 
