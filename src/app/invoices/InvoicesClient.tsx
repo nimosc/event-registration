@@ -513,6 +513,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, [initialDocumentConfig?.extractFromFile]);
 
   const openAccountingModal = useCallback((invoiceId: string) => {
+    setError(null);
     setAccountingInvoiceId(invoiceId);
     setAccountingFile(null);
     setAccountingInvoiceNumber("");
@@ -660,6 +661,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   ]);
 
   const openVoluntaryModal = useCallback(() => {
+    setError(null);
     setEventsDescription("");
     setVoluntaryAmount("");
     setInvoiceForm({
@@ -1115,7 +1117,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           </div>
         )}
 
-        {error && !needsTaxStatusPrompt && (
+        {error && !needsTaxStatusPrompt && !showVoluntaryModal && !showMonthInvoiceModal && !showAccountingModal && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-600 text-sm">
             {error}
           </div>
@@ -1273,23 +1275,29 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         )}
 
         {showVoluntaryModal && selectedMonth !== "all" && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowVoluntaryModal(false)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => { setShowVoluntaryModal(false); setError(null); }}>
             <div className="relative bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden border border-gray-200 flex flex-col" onClick={(e) => e.stopPropagation()}>
               {submittingInvoice && (
                 <div className="absolute inset-0 z-10 bg-white/90 flex flex-col items-center justify-center gap-3 rounded-2xl px-6 text-center">
                   <span className="h-8 w-8 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
                   <span className="text-base font-semibold text-gray-800">ההגשה בבדיקה</span>
-                  <span className="text-sm text-gray-600">זה עשוי לקחת כ-15 שניות</span>
+                  <span className="text-sm text-gray-600">זה ייקח מספר שניות</span>
                 </div>
               )}
-              <div className="p-6 border-b border-gray-200">
+              <div className="p-6 pb-4 border-b border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900">
                   הגשה ידנית — {voluntaryDocumentLabel}
                 </h3>
-                <p className="text-sm text-gray-500 mt-1">{monthKeyToLabel(selectedMonth)}</p>
-                <p className="text-sm text-amber-800 mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                  חסר מידע במערכת? העלה {voluntaryDocumentLabel}, פרט עבור אילו אירועים מדובר — נבדוק אצלנו.
-                </p>
+                <p className="text-sm text-gray-500 mt-0.5">{monthKeyToLabel(selectedMonth)}</p>
+                <div className="mt-3 flex gap-2.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-3">
+                  <svg className="w-5 h-5 flex-shrink-0 text-blue-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm text-blue-900 leading-relaxed">
+                    <span className="font-semibold">מתי משתמשים בטופס הזה?</span>{" "}
+                    כשאירוע שהשתתפת בו לא מופיע במערכת. פרט אילו אירועים חסרים וצרף {voluntaryDocumentLabel} — הצוות שלנו יבדוק ויאשר.
+                  </p>
+                </div>
               </div>
               <div className="p-6 overflow-y-auto flex-1 space-y-4">
                 <label className="block">
@@ -1307,60 +1315,94 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   <span className="text-sm font-medium text-gray-700">
                     סכום להגשה <span className="text-red-500">*</span>
                   </span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    className="input-field mt-1"
-                    placeholder="סכום בשקלים"
-                    value={voluntaryAmount}
-                    onChange={(e) => setVoluntaryAmount(e.target.value)}
-                  />
+                  <div className="relative mt-1">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="input-field pe-10"
+                      placeholder="סכום בשקלים"
+                      value={voluntaryAmount}
+                      onChange={(e) => setVoluntaryAmount(e.target.value)}
+                    />
+                    <span className="pointer-events-none absolute inset-y-0 end-3.5 flex items-center text-sm text-gray-400">₪</span>
+                  </div>
                 </label>
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-                  <div className="text-sm font-semibold text-gray-800">פרטי בנק</div>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="שם המוטב"
-                    value={invoiceForm.beneficiaryName}
-                    onChange={(e) => setInvoiceForm((f) => ({ ...f, beneficiaryName: e.target.value }))}
-                  />
+                  <div className="text-sm font-semibold text-gray-800">פרטי בנק להעברה</div>
+                  <label className="block">
+                    <span className="text-xs font-medium text-gray-600">שם המוטב</span>
+                    <input
+                      type="text"
+                      className="input-field mt-1 bg-white"
+                      placeholder="השם המלא בחשבון הבנק"
+                      value={invoiceForm.beneficiaryName}
+                      onChange={(e) => setInvoiceForm((f) => ({ ...f, beneficiaryName: e.target.value }))}
+                    />
+                  </label>
                   <div className="grid grid-cols-3 gap-2">
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="קוד בנק"
-                      value={invoiceForm.bankCode}
-                      onChange={(e) => setInvoiceForm((f) => ({ ...f, bankCode: e.target.value }))}
-                    />
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="סניף"
-                      value={invoiceForm.bankBranch}
-                      onChange={(e) => setInvoiceForm((f) => ({ ...f, bankBranch: e.target.value }))}
-                    />
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="חשבון"
-                      value={invoiceForm.bankAccount}
-                      onChange={(e) => setInvoiceForm((f) => ({ ...f, bankAccount: e.target.value }))}
-                    />
+                    <label className="block">
+                      <span className="text-xs font-medium text-gray-600">קוד בנק</span>
+                      <input
+                        type="text"
+                        className="input-field mt-1 bg-white"
+                        placeholder="12"
+                        value={invoiceForm.bankCode}
+                        onChange={(e) => setInvoiceForm((f) => ({ ...f, bankCode: e.target.value }))}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-gray-600">סניף</span>
+                      <input
+                        type="text"
+                        className="input-field mt-1 bg-white"
+                        placeholder="345"
+                        value={invoiceForm.bankBranch}
+                        onChange={(e) => setInvoiceForm((f) => ({ ...f, bankBranch: e.target.value }))}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-gray-600">חשבון</span>
+                      <input
+                        type="text"
+                        className="input-field mt-1 bg-white"
+                        placeholder="1234567"
+                        value={invoiceForm.bankAccount}
+                        onChange={(e) => setInvoiceForm((f) => ({ ...f, bankAccount: e.target.value }))}
+                      />
+                    </label>
                   </div>
                 </div>
-                <label className="block">
+                <div>
                   <span className="text-sm font-medium text-gray-700">
                     {initialDocumentConfig?.fileLabel ?? "מסמך"} <span className="text-red-500">*</span>
                   </span>
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    className="mt-2 block w-full text-sm"
-                    onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
-                  />
-                </label>
+                  <label
+                    className={`mt-1.5 block w-full cursor-pointer rounded-xl border-2 px-4 py-3 transition-colors ${
+                      invoiceFile
+                        ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
+                        : "border-dashed border-blue-300 bg-blue-50 hover:bg-blue-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`text-sm font-medium ${invoiceFile ? "text-emerald-800" : "text-blue-800"}`}>
+                        {invoiceFile ? "הקובץ צורף בהצלחה" : "לחץ/י כאן לבחירת קובץ"}
+                      </span>
+                      <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${invoiceFile ? "bg-emerald-200 text-emerald-800" : "bg-blue-200 text-blue-800"}`}>
+                        PDF / תמונה
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-600 truncate text-right">
+                      {invoiceFile ? invoiceFile.name : "לא נבחר קובץ"}
+                    </div>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      className="hidden"
+                      onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                </div>
                 {invoiceFile && initialDocumentConfig?.extractFromFile && (
                   <input
                     type="text"
@@ -1383,8 +1425,18 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                     onChange={(e) => setInvoiceForm((f) => ({ ...f, description: e.target.value }))}
                   />
                 </label>
-                <div className="flex gap-2 justify-end pt-2">
-                  <button type="button" onClick={() => setShowVoluntaryModal(false)} className="btn-secondary" disabled={submittingInvoice}>
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+                {error && (
+                  <div className="mb-3 flex gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.062 20h13.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.33 17c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span>{error}</span>
+                  </div>
+                )}
+                <div className="flex gap-2 justify-end">
+                  <button type="button" onClick={() => { setShowVoluntaryModal(false); setError(null); }} className="btn-secondary" disabled={submittingInvoice}>
                     ביטול
                   </button>
                   <button
@@ -1420,13 +1472,13 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           const submitBlockReason = getSubmitBlockingReason(selectedOrderIds.length, monthTotal);
           const effectiveAmount = reportedAmount;
           return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowMonthInvoiceModal(false)}>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => { setShowMonthInvoiceModal(false); setError(null); }}>
               <div className="relative bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden border border-gray-200 flex flex-col" onClick={(e) => e.stopPropagation()}>
                 {submittingInvoice && (
                   <div className="absolute inset-0 z-10 bg-white/90 flex flex-col items-center justify-center gap-3 rounded-2xl px-6 text-center">
                     <span className="h-8 w-8 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
                     <span className="text-base font-semibold text-gray-800">ההגשה בבדיקה</span>
-                    <span className="text-sm text-gray-600">זה עשוי לקחת כ-15 שניות</span>
+                    <span className="text-sm text-gray-600">זה ייקח מספר שניות</span>
                     <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-800 tabular-nums">
                       <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
                       {submittingSeconds} שניות
@@ -1684,8 +1736,16 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                         </div>
                       )}
                     </div>
+                    {error && (
+                      <div className="flex gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.062 20h13.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.33 17c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <span>{error}</span>
+                      </div>
+                    )}
                     <div className="flex gap-2 justify-end">
-                      <button type="button" onClick={() => setShowMonthInvoiceModal(false)} className="btn-secondary" disabled={submittingInvoice}>
+                      <button type="button" onClick={() => { setShowMonthInvoiceModal(false); setError(null); }} className="btn-secondary" disabled={submittingInvoice}>
                         ביטול
                       </button>
                       <button
@@ -1717,7 +1777,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
               <div className="absolute inset-0 z-10 bg-white/90 flex flex-col items-center justify-center gap-3 rounded-2xl px-6 text-center">
                 <span className="h-8 w-8 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
                 <span className="text-base font-semibold text-gray-800">ההגשה בבדיקה</span>
-                <span className="text-sm text-gray-600">בודקים את המסמך מול בקשת התשלום — עד כ-15 שניות</span>
+                <span className="text-sm text-gray-600">בודקים את המסמך מול בקשת התשלום — מספר שניות</span>
                 <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-800 tabular-nums">
                   <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
                   {submittingAccountingSeconds} שניות
@@ -1778,12 +1838,20 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   <div className="mt-1 font-medium">ניתן להגיש — הרשומה תסומן לבדיקת מנהל.</div>
                 </div>
               )}
+              {error && (
+                <div className="flex gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.062 20h13.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.33 17c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <span>{error}</span>
+                </div>
+              )}
               <div className="flex gap-2 justify-end">
                 <button
                   type="button"
                   className="btn-secondary"
                   disabled={submittingAccounting}
-                  onClick={() => setShowAccountingModal(false)}
+                  onClick={() => { setShowAccountingModal(false); setError(null); }}
                 >
                   ביטול
                 </button>
