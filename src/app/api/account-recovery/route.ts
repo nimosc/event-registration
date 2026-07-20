@@ -134,6 +134,7 @@ async function getArtistsWithPhoneColumn(phoneColumnId: string): Promise<ArtistW
           items {
             id
             name
+            created_at
             column_values(ids: ${columnIds}) {
               id
               text
@@ -159,6 +160,7 @@ async function getArtistsWithPhoneColumn(phoneColumnId: string): Promise<ArtistW
           items {
             id
             name
+            created_at
             column_values(ids: ${columnIds}) {
               id
               text
@@ -216,9 +218,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "אין לך משתמש" }, { status: 404 });
     }
 
-    const activeArtist = matchedArtists.find(
-      (item) => (getColumnValue(item, ARTIST_ACTIVE_STATUS_COLUMN_ID)?.text || "").trim() === "פעיל"
-    );
+    // When duplicates share a phone, the OLDEST active record is the canonical one
+    // (arbitrary board order previously decided which record got the login link).
+    const activeArtist = matchedArtists
+      .filter(
+        (item) => (getColumnValue(item, ARTIST_ACTIVE_STATUS_COLUMN_ID)?.text || "").trim() === "פעיל"
+      )
+      .sort((a, b) =>
+        ((a as { created_at?: string }).created_at || "").localeCompare(
+          (b as { created_at?: string }).created_at || ""
+        )
+      )[0];
     if (activeArtist) {
       await postJsonWebhook(ACCOUNT_RECOVERY_WEBHOOK_URL, {
         phone: to972Format(phoneInputRaw),

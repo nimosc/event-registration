@@ -9,6 +9,8 @@ interface LoginClientProps {
 
 export default function LoginClient({ magicId, inactive }: LoginClientProps) {
   const magicLinkFired = useRef(false);
+  /** הרשמה עצמית מוסתרת כרגע (כפילויות בלוח האמנים) — להחזרה: true */
+  const REGISTRATION_ENABLED = false;
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
@@ -152,39 +154,43 @@ export default function LoginClient({ magicId, inactive }: LoginClientProps) {
           </div>
         ) : (
           <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-8">
-            <div className="grid grid-cols-2 gap-2 mb-5 p-1 bg-gray-100 rounded-xl">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("login");
-                  setError(null);
-                  setMessage(null);
-                }}
-                className={`rounded-lg py-2.5 text-sm font-medium transition-colors ${
-                  !isRegisterMode ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                התחברות
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("register");
-                  setError(null);
-                  setMessage(null);
-                }}
-                className={`rounded-lg py-2.5 text-sm font-medium transition-colors ${
-                  isRegisterMode ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                הרשמה חדשה
-              </button>
-            </div>
+            {REGISTRATION_ENABLED && (
+              <div className="grid grid-cols-2 gap-2 mb-5 p-1 bg-gray-100 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("login");
+                    setError(null);
+                    setMessage(null);
+                  }}
+                  className={`rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                    !isRegisterMode ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  התחברות
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("register");
+                    setError(null);
+                    setMessage(null);
+                  }}
+                  className={`rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                    isRegisterMode ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  הרשמה חדשה
+                </button>
+              </div>
+            )}
 
             <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700">
               {isRegisterMode
                 ? "מילוי הטופס אינו התחייבות. לאחר בדיקה נחזור אליך ונעדכן על המשך התהליך."
-                : "ההודעה נשלחת רק למשתמש פעיל. אם עדיין אין לך משתמש, אפשר לעבור להרשמה חדשה."}
+                : REGISTRATION_ENABLED
+                  ? "ההודעה נשלחת רק למשתמש פעיל. אם עדיין אין לך משתמש, אפשר לעבור להרשמה חדשה."
+                  : "מזינים את מספר הטלפון שאיתו נרשמת — ונשלח לך קישור התחברות בוואטסאפ."}
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -327,7 +333,9 @@ export default function LoginClient({ magicId, inactive }: LoginClientProps) {
                   </svg>
                   <span>
                     {isNoAccountError
-                      ? "עדיין אין לך משתמש במערכת. מוזמן להירשם."
+                      ? REGISTRATION_ENABLED
+                        ? "עדיין אין לך משתמש במערכת. מוזמן להירשם."
+                        : "לא נמצא משתמש עם הטלפון הזה. אם לדעתך זו טעות — פנה למנהל."
                       : isInactiveError
                         ? "משתמש לא פעיל. כרגע אין לך גישה למערכת."
                         : error}
@@ -335,7 +343,7 @@ export default function LoginClient({ magicId, inactive }: LoginClientProps) {
                 </div>
               )}
 
-              {!isRegisterMode && isNoAccountError && (
+              {REGISTRATION_ENABLED && !isRegisterMode && isNoAccountError && (
                 <button
                   type="button"
                   onClick={() => {

@@ -5,6 +5,10 @@ import {
   BOARDS,
   mondayQuery,
 } from "@/lib/monday";
+import { postJsonWebhook } from "@/lib/webhook";
+
+const ACCOUNT_RECOVERY_WEBHOOK_URL =
+  "https://hook.eu1.make.com/kxu61lmvm2l73w7qrrs6ghy379yknvij";
 
 type MondayColumnDef = {
   id: string;
@@ -187,48 +191,72 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "לא נמצאה עמודת טלפון" }, { status: 500 });
     }
 
-    const existingData = await mondayQuery<{
-      boards: {
-        items_page: {
-          items: {
-            id: string;
-            group: { id: string; title: string };
-            column_values: { id: string; text: string; value: string | null }[];
-          }[];
-        };
-      }[];
-    }>(`
-      query {
-        boards(ids: [${BOARDS.ARTISTS}]) {
-          items_page(limit: 500) {
-            items {
-              id
-              group {
-                id
-                title
-              }
-              column_values(ids: ["${phoneColumn.id}"]) {
-                id
-                text
-                value
-              }
-            }
-          }
-        }
+    // Fetch ALL artists (paginated — the board exceeds one 500-item page) so the
+    // duplicate checks below actually see every record.
+    type ExistingItem = {
+      id: string;
+      name: string;
+      created_at: string;
+      group: { id: string; title: string };
+      column_values: { id: string; text: string; value: string | null }[];
+    };
+    type ExistingPage = { cursor: string | null; items: ExistingItem[] };
+    const items: ExistingItem[] = [];
+    {
+      const colSelection = `column_values(ids: ["${phoneColumn.id}", "${ARTIST_ACTIVE_STATUS_COLUMN_ID}"]) { id text value }`;
+      let cursor: string | null = null;
+      let first = true;
+      while (first || cursor) {
+        const pageQuery: string = first
+          ? `{ boards(ids: [${BOARDS.ARTISTS}]) { items_page(limit: 500) { cursor items { id name created_at group { id title } ${colSelection} } } } }`
+          : `{ next_items_page(cursor: "${cursor}", limit: 500) { cursor items { id name created_at group { id title } ${colSelection} } } }`;
+        const pageData = await mondayQuery<{
+          boards?: Array<{ items_page: ExistingPage }>;
+          next_items_page?: ExistingPage;
+        }>(pageQuery);
+        const page: ExistingPage | undefined = first
+          ? pageData.boards?.[0]?.items_page
+          : pageData.next_items_page;
+        first = false;
+        items.push(...(page?.items ?? []));
+        cursor = page?.cursor ?? null;
       }
-    `);
+    }
 
-    const items = existingData.boards?.[0]?.items_page?.items ?? [];
-    const hasPending = items.some((item) => {
-      if (item.group?.id !== targetGroup.id) return false;
-      const phoneCol = item.column_values?.[0];
+    const phoneMatches = (item: ExistingItem): boolean => {
+      const phoneCol = item.column_values?.find((cv) => cv.id === phoneColumn.id);
       const candidates = new Set<string>();
       if (phoneCol?.text) candidates.add(to972Format(phoneCol.text));
       for (const phoneCandidate of extractPhoneFromValue(phoneCol?.value)) {
         candidates.add(phoneCandidate);
       }
       return candidates.has(normalizedPhone);
-    });
+    };
+    const statusOf = (item: ExistingItem): string =>
+      (item.column_values?.find((cv) => cv.id === ARTIST_ACTIVE_STATUS_COLUMN_ID)?.text || "").trim();
+
+    // Existing ACTIVE account with this phone → don't create a duplicate; send a
+    // login link through the recovery flow instead.
+    const activeMatches = items
+      .filter((item) => phoneMatches(item) && statusOf(item) === "פעיל")
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    if (activeMatches.length > 0) {
+      const canonical = activeMatches[0];
+      await postJsonWebhook(ACCOUNT_RECOVERY_WEBHOOK_URL, {
+        phone: normalizedPhone,
+        normalizedPhone,
+        name: canonical.name,
+        mondayItemId: canonical.id,
+      });
+      return NextResponse.json(
+        { error: "כבר יש לך משתמש במערכת — שלחנו לך עכשיו קישור התחברות בוואטסאפ 📱" },
+        { status: 409 }
+      );
+    }
+
+    const hasPending = items.some(
+      (item) => item.group?.id === targetGroup.id && phoneMatches(item)
+    );
 
     if (hasPending) {
       return NextResponse.json(
