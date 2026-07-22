@@ -85,6 +85,7 @@ export default function NavBar({ userName, userRole, userLocation, adminMode = "
       ? [
           { href: "/admin", label: "אישור מועמדות", adminMode: "candidacy" as const },
           { href: "/admin?mode=arrival", label: "אישור הגעה", adminMode: "arrival" as const },
+          { href: "/admin/reports/instructors", label: "דוח פעילות" },
         ]
       : [
           { href: "/orders", label: "הזמנות פתוחות" },
