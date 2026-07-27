@@ -98,6 +98,8 @@ const ICONS = {
   empty: "M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z",
   arrowUp: "M4.5 15.75l7.5-7.5 7.5 7.5",
   arrowDown: "M19.5 8.25l-7.5 7.5-7.5-7.5",
+  download:
+    "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3",
 };
 
 const METRIC_ICON: Record<ReportMetric, string> = {
@@ -122,6 +124,7 @@ export default function InstructorReportClient({ user }: { user: SessionUser }) 
   const [sortKey, setSortKey] = useState<string>("total");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
   const [showUnmapped, setShowUnmapped] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,6 +242,65 @@ export default function InstructorReportClient({ user }: { user: SessionUser }) 
     setTo("");
   }
 
+  /**
+   * מייצא לאקסל בדיוק את מה שרואים על המסך: המטריקה הפעילה, שורות מסוננות
+   * (תאריך + חיפוש) בסדר המיון הנוכחי, כולל שורת סיכום.
+   */
+  async function exportToExcel() {
+    if (visibleRows.length === 0 || exporting) return;
+    setExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const regions = report.regions;
+      const metricLabel = METRICS[metric].label;
+
+      const rangeLabel =
+        from || to ? `${from || "תחילה"} — ${to || "היום"}` : "כל התאריכים";
+
+      const titleRows: (string | number)[][] = [
+        [`דוח פעילות אומנים לפי אזורים — ${metricLabel}`],
+        [
+          `טווח תאריכים: ${rangeLabel}${
+            search.trim() ? ` · חיפוש: "${search.trim()}"` : ""
+          }`,
+        ],
+        [`הופק: ${new Date().toLocaleString("he-IL")}`],
+        [],
+      ];
+
+      const header = ["#", "אומן", ...regions, "סה״כ"];
+      const body = visibleRows.map((row, idx) => [
+        idx + 1,
+        row.name,
+        ...regions.map((r) => row.byRegion[r]?.[metric] ?? 0),
+        row.totals[metric],
+      ]);
+      const footer = [
+        "",
+        `סה״כ (${visibleRows.length} אומנים)`,
+        ...regions.map((r) => visibleTotals.byRegion[r]?.[metric] ?? 0),
+        visibleTotals.total[metric],
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet([...titleRows, header, ...body, footer]);
+      ws["!cols"] = [
+        { wch: 4 },
+        { wch: 26 },
+        ...regions.map(() => ({ wch: 16 })),
+        { wch: 8 },
+      ];
+      // תצוגת גיליון מימין לשמאל
+      (ws as unknown as { "!views": unknown[] })["!views"] = [{ RTL: true }];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "פעילות אומנים");
+      const today = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `דוח-פעילות-אומנים-${metricLabel}-${today}.xlsx`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const activePreset = useMemo(() => {
     if (!from && !to) return "הכל";
     if (to) return null;
@@ -304,6 +366,18 @@ export default function InstructorReportClient({ user }: { user: SessionUser }) 
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={exportToExcel}
+              disabled={loading || exporting || visibleRows.length === 0}
+              title="ייצוא הנתונים המסוננים לאקסל"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-emerald-600/20"
+            >
+              <Icon
+                path={exporting ? ICONS.refresh : ICONS.download}
+                className={`w-4 h-4 ${exporting ? "animate-spin" : ""}`}
+              />
+              ייצוא לאקסל
+            </button>
             <button
               onClick={() => setReloadKey((k) => k + 1)}
               disabled={loading}
