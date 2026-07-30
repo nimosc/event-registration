@@ -23,6 +23,7 @@ import {
   isSubitemInvoiceComplete,
 } from "@/lib/invoiceDocuments";
 import { invoiceAmountsMatch, validateExtractedAgainstExpected } from "@/lib/invoiceValidation";
+import { prepareInvoiceFile, FileTooLargeError } from "@/lib/prepareInvoiceFile";
 
 interface Registration {
   orderId: string;
@@ -500,13 +501,32 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, [artistStatus, savingTaxStatus]);
 
   const handleFileChange = useCallback(async (file: File | null) => {
-    setInvoiceFile(file);
     setExtractionToken("");
-    if (!file || !initialDocumentConfig?.extractFromFile) return;
+    if (!file) {
+      setInvoiceFile(null);
+      return;
+    }
+
+    // דחיסת תמונה גדולה / חסימת קובץ גדול מדי — לפני העלאה וחילוץ.
+    let prepared: File;
+    try {
+      prepared = (await prepareInvoiceFile(file)).file;
+    } catch (err) {
+      if (err instanceof FileTooLargeError) {
+        setInvoiceFile(null);
+        setError(`${err.message}. ניתן לצלם את המסמך כתמונה או להקטין אותו ולנסות שוב.`);
+        return;
+      }
+      prepared = file; // כשל לא צפוי — ממשיכים עם הקובץ המקורי.
+    }
+    setInvoiceFile(prepared);
+    setError(null);
+
+    if (!initialDocumentConfig?.extractFromFile) return;
     setExtractingFile(true);
     try {
       const fd = new FormData();
-      fd.append("file", file, file.name);
+      fd.append("file", prepared, prepared.name);
       const res = await fetch("/api/invoices/extract", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) return;
@@ -540,15 +560,34 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, []);
 
   const handleAccountingFileChange = useCallback(async (file: File | null) => {
-    setAccountingFile(file);
     setAccountingExtractedAmount(null);
     setAccountingExtractedNumber("");
     setAccountingExtractionToken("");
-    if (!file || !followUpAccountingDocument.extractFromFile) return;
+    if (!file) {
+      setAccountingFile(null);
+      return;
+    }
+
+    // דחיסת תמונה גדולה / חסימת קובץ גדול מדי — לפני העלאה וחילוץ.
+    let prepared: File;
+    try {
+      prepared = (await prepareInvoiceFile(file)).file;
+    } catch (err) {
+      if (err instanceof FileTooLargeError) {
+        setAccountingFile(null);
+        setError(`${err.message}. ניתן לצלם את המסמך כתמונה או להקטין אותו ולנסות שוב.`);
+        return;
+      }
+      prepared = file; // כשל לא צפוי — ממשיכים עם הקובץ המקורי.
+    }
+    setAccountingFile(prepared);
+    setError(null);
+
+    if (!followUpAccountingDocument.extractFromFile) return;
     setExtractingAccountingFile(true);
     try {
       const fd = new FormData();
-      fd.append("file", file, file.name);
+      fd.append("file", prepared, prepared.name);
       const res = await fetch("/api/invoices/extract", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) return;
