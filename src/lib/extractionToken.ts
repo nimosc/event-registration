@@ -14,6 +14,7 @@ interface ExtractionTokenPayload {
   receiptNumber: string | null;
   amount: number | null;
   description: string | null;
+  documentType: ExtractedInvoiceFields["documentType"];
   exp: number;
 }
 
@@ -41,6 +42,7 @@ export function signExtractionToken(
     receiptNumber: fields.receiptNumber ?? null,
     amount: fields.amount ?? null,
     description: fields.description ?? null,
+    documentType: fields.documentType ?? null,
     exp: Date.now() + TOKEN_TTL_MS,
   };
   const body = b64url(JSON.stringify(payload));
@@ -81,6 +83,7 @@ export function verifyExtractionToken(
     receiptNumber: payload.receiptNumber ?? null,
     amount: payload.amount ?? null,
     description: payload.description ?? null,
+    documentType: payload.documentType ?? null,
   };
 }
 

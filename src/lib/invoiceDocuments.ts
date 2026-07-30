@@ -1,3 +1,5 @@
+import type { DocumentClassification } from "@/lib/invoiceValidation";
+
 export type ArtistTaxStatus = "מורשה" | "פטור";
 
 export const INVOICE_SUBMISSION_STATUS = {
@@ -23,6 +25,8 @@ export const INVOICE_MATCH_STATUS = {
   OK: "תקין",
   REQUEST_DIFFERENT: "בקשת תשלום שונה",
   RECEIPT_DIFFERENT: "קבלה שונה מהבקשת תשלום",
+  /** ההגשה עברה בלי אימות סוג מסמך (חילוץ AI לא היה זמין) — למנהל לבדוק */
+  NEEDS_REVIEW: "לבדיקה",
 } as const;
 
 export type InvoiceSubmissionStatus =
@@ -60,7 +64,7 @@ export function getFollowUpAccountingDocument(taxStatus: ArtistTaxStatus) {
 
 export function getSubmissionStatusDisplay(status: string): string {
   if (status === INVOICE_SUBMISSION_STATUS.PAYMENT_REQUEST) {
-    return "הגשת בקשת תשלום — צריך להגיש מסמך חשבונאי";
+    return "התקבלה בהצלחה בקשת התשלום — לאחר קבלת התשלום יש להעלות מסמך חשבונאי";
   }
   if (status === INVOICE_SUBMISSION_STATUS.ACCOUNTING) {
     return "הוגש מסמך חשבונאי";
@@ -89,9 +93,55 @@ export function isSubitemInvoiceBlocked(status: string): boolean {
   return isSubitemInvoiceComplete(status) || isSubitemAwaitingAccounting(status);
 }
 
+/**
+ * תוצאת אימות סוג המסמך מול השלב הנוכחי.
+ * - ok=false → לחסום עם `error`.
+ * - fillBothColumns → העלו קבלה בשלב בקשת תשלום: לשים בשתי העמודות ולהמשיך.
+ * - needsReview → אין סיווג (חילוץ AI לא זמין): fail-open, לסמן "לבדיקה".
+ */
+export interface DocumentTypeCheck {
+  ok: boolean;
+  error?: string;
+  fillBothColumns?: boolean;
+  needsReview?: boolean;
+}
+
+const NOT_A_DOCUMENT_ERROR = "המסמך שהועלה אינו נראה כבקשת תשלום או קבלה. יש להעלות מסמך תקין.";
+
+/**
+ * שלב 1 — מצופה בקשת תשלום.
+ * receipt → מקובל וממלא את שתי העמודות. payment_request → זרימה רגילה.
+ * other → נחסם. סיווג חסר (null) → fail-open עם סימון לבדיקה.
+ */
+export function checkDocumentTypeForPaymentRequest(
+  docType: DocumentClassification | null | undefined
+): DocumentTypeCheck {
+  if (docType == null) return { ok: true, needsReview: true };
+  if (docType === "other") return { ok: false, error: NOT_A_DOCUMENT_ERROR };
+  if (docType === "receipt") return { ok: true, fillBothColumns: true };
+  return { ok: true };
+}
+
+/**
+ * שלב 2 — מצופה מסמך חשבונאי (קבלה / חשבונית מס קבלה).
+ * receipt → זרימה רגילה. payment_request → נחסם עם הודעה מותאמת.
+ * other → נחסם. סיווג חסר (null) → fail-open עם סימון לבדיקה.
+ */
+export function checkDocumentTypeForAccounting(
+  docType: DocumentClassification | null | undefined,
+  accountingLabel: string
+): DocumentTypeCheck {
+  if (docType == null) return { ok: true, needsReview: true };
+  if (docType === "payment_request") {
+    return { ok: false, error: `העלית בקשת תשלום — יש להעלות ${accountingLabel}` };
+  }
+  if (docType === "other") return { ok: false, error: NOT_A_DOCUMENT_ERROR };
+  return { ok: true };
+}
+
 export function getSubitemInvoiceStatusDisplay(status: string): string {
   if (isSubitemAwaitingAccounting(status)) {
-    return "הגשת בקשת תשלום — צריך להגיש מסמך חשבונאי";
+    return "התקבלה בהצלחה בקשת התשלום — לאחר קבלת התשלום יש להעלות מסמך חשבונאי";
   }
   if (isSubitemInvoiceComplete(status)) {
     return SUBITEM_INVOICE_STATUS.SUBMITTED;

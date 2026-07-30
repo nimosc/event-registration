@@ -20,6 +20,7 @@ import {
   parseInvoiceMonthKey,
 } from "@/lib/invoiceEligibility";
 import {
+  checkDocumentTypeForAccounting,
   getFollowUpAccountingDocument,
   INVOICE_MATCH_STATUS,
   INVOICE_SUBMISSION_STATUS,
@@ -148,6 +149,17 @@ export async function POST(req: NextRequest) {
     const receiptAmountMismatch =
       extracted?.amount != null && !invoiceAmountsMatch(extracted.amount, expectedAmount);
 
+    // אימות סוג המסמך: מצופה מסמך חשבונאי (קבלה / חשבונית מס קבלה).
+    const typeCheck = checkDocumentTypeForAccounting(
+      extracted?.documentType,
+      accountingDocument.fileLabel
+    );
+    if (!typeCheck.ok) {
+      return NextResponse.json({ error: typeCheck.error }, { status: 400 });
+    }
+    // אין סיווג (חילוץ AI לא זמין) → עובר (fail-open) אך מסומן לבדיקה.
+    const needsTypeReview = typeCheck.needsReview === true;
+
     // Upload first (the completed status must never exist without the file),
     // then the independent metadata writes run in parallel.
     await uploadFileToInvoiceColumn(invoiceId, INVOICE_ACCOUNTING_FILE_COLUMN_ID, file, file.name);
@@ -157,9 +169,11 @@ export async function POST(req: NextRequest) {
         extractedAmount: extracted?.amount ?? undefined,
       }),
       updateInvoiceSubmissionStatus(invoiceId, accountingDocument.submissionStatus),
-      receiptAmountMismatch
-        ? updateInvoiceMatchStatus(invoiceId, INVOICE_MATCH_STATUS.RECEIPT_DIFFERENT)
-        : Promise.resolve(),
+      needsTypeReview
+        ? updateInvoiceMatchStatus(invoiceId, INVOICE_MATCH_STATUS.NEEDS_REVIEW)
+        : receiptAmountMismatch
+          ? updateInvoiceMatchStatus(invoiceId, INVOICE_MATCH_STATUS.RECEIPT_DIFFERENT)
+          : Promise.resolve(),
     ]);
 
     // Subitem bookkeeping runs after the response is sent.

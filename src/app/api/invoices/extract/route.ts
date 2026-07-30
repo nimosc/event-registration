@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
       receiptNumber: null,
       amount: null,
       description: null,
+      documentType: null,
       skipped: true,
       message: "חילוץ אוטומטי לא זמין — ניתן להמשיך ולהזין ידנית",
     });
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
       receiptNumber: parsed.receiptNumber ?? null,
       amount: parsed.amount != null ? Number(parsed.amount) : null,
       description: parsed.description ?? null,
+      documentType: parsed.documentType ?? null,
     };
     // Signed token lets the submit route reuse this extraction for the same file
     // instead of running the AI again (saves 4-8s on submit).
@@ -44,6 +46,7 @@ export async function POST(req: NextRequest) {
       receiptNumber: null,
       amount: null,
       description: null,
+      documentType: null,
       skipped: true,
       message: "לא הצלחנו לחלץ נתונים מהקובץ — ניתן להמשיך ולהזין ידנית",
     });

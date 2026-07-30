@@ -13,10 +13,14 @@ export function invoiceNumbersMatch(a: string, b: string): boolean {
   return na === nb || na.endsWith(nb) || nb.endsWith(na);
 }
 
+/** ראה DocumentClassification ב-invoiceExtract — מוגדר כאן כדי להימנע מתלות שרת */
+export type DocumentClassification = "receipt" | "payment_request" | "other";
+
 export interface ExtractedInvoiceFields {
   receiptNumber: string | null;
   amount: number | null;
   description?: string | null;
+  documentType?: DocumentClassification | null;
 }
 
 export function validateExtractedAgainstExpected(params: {

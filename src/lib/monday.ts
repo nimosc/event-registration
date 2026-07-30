@@ -1962,13 +1962,16 @@ export async function updateInvoiceMatchStatus(
   invoiceItemId: string,
   matchStatus: string
 ): Promise<void> {
+  // create_labels_if_missing: התווית "לבדיקה" עשויה שלא להתקיים עדיין בעמודה —
+  // ניצור אותה בעת הצורך. לתוויות קיימות אין לזה השפעה.
   await mondayQuery(
     `mutation {
       change_column_value(
         board_id: ${BOARDS.INVOICES},
         item_id: ${invoiceItemId},
         column_id: "${INVOICE_MATCH_STATUS_COLUMN_ID}",
-        value: ${JSON.stringify(JSON.stringify({ label: matchStatus }))}
+        value: ${JSON.stringify(JSON.stringify({ label: matchStatus }))},
+        create_labels_if_missing: true
       ) { id }
     }`
   );

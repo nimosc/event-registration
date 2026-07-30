@@ -23,9 +23,12 @@ import {
 import {
   canSubmitInvoice,
   getInvoiceMonthSubmissionError,
+  isPaymentRequestConsideredPaid,
   parseInvoiceMonthKey,
 } from "@/lib/invoiceEligibility";
 import {
+  checkDocumentTypeForPaymentRequest,
+  getAccountingDocumentLabel,
   getInitialDocumentForTaxStatus,
   INVOICE_MATCH_STATUS,
   INVOICE_SUBMISSION_STATUS,
@@ -111,7 +114,7 @@ export async function POST(req: NextRequest) {
 
   // Kick off all independent work in parallel: Monday reads + extraction resolution.
   const taxStatusPromise = getArtistTaxStatus(artistId);
-  const existingInvoicesPromise = voluntarySubmission ? null : getArtistInvoices(session.id);
+  const existingInvoicesPromise = getArtistInvoices(session.id);
   const ordersPromise =
     voluntarySubmission || orderIds.length === 0 ? null : getOrdersByIdsForInvoice(orderIds);
 
@@ -130,6 +133,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "יש לבחור סוג עוסק לפני הגשה" }, { status: 400 });
   }
   const documentConfig = getInitialDocumentForTaxStatus(taxStatus);
+
+  // שוטף +60: אם קיימת בקשת תשלום שכבר שולמה לפי תנאי התשלום וטרם הועלה עליה
+  // מסמך חשבונאי — חוסמים הגשת בקשה חדשה עד שהיא תושלם.
+  const existingInvoices = await existingInvoicesPromise;
+  const overduePaidRequests = existingInvoices.filter(
+    (inv) =>
+      inv.submissionStatus === INVOICE_SUBMISSION_STATUS.PAYMENT_REQUEST &&
+      isPaymentRequestConsideredPaid(inv.date)
+  );
+  if (overduePaidRequests.length > 0) {
+    const accountingLabel = getAccountingDocumentLabel(taxStatus);
+    return NextResponse.json(
+      {
+        error: `לפי תנאי התשלום (שוטף +60), התשלום עבור ${overduePaidRequests
+          .map((inv) => inv.name)
+          .join(", ")} כבר בוצע — יש להעלות ${accountingLabel} עליו לפני הגשת בקשת תשלום חדשה`,
+      },
+      { status: 409 }
+    );
+  }
 
   let resolvedOrderIds = orderIds;
   let resolvedSubitemIds = subitemIds;
@@ -169,8 +192,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "יש לבחור לפחות אירוע אחד" }, { status: 400 });
     }
 
-    const existing = (await existingInvoicesPromise) ?? [];
-    const existingOrderIds = new Set(existing.flatMap((inv) => inv.orderIds));
+    const existingOrderIds = new Set(existingInvoices.flatMap((inv) => inv.orderIds));
     const duplicates = orderIds.filter((id) => existingOrderIds.has(id));
     if (duplicates.length > 0) {
       return NextResponse.json({ error: "חשבונית כבר הוגשה עבור חלק מהאירועים" }, { status: 409 });
@@ -236,6 +258,8 @@ export async function POST(req: NextRequest) {
     : null;
   const extractedAmount = extractedInvoice?.amount ?? undefined;
 
+  let fillBothColumns = false;
+  let needsTypeReview = false;
   if (documentConfig.extractFromFile) {
     const validationError = validateExtractedAgainstExpected({
       extracted: extractedInvoice,
@@ -247,6 +271,16 @@ export async function POST(req: NextRequest) {
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
+
+    // אימות סוג המסמך: מצופה בקשת תשלום בשלב זה.
+    const typeCheck = checkDocumentTypeForPaymentRequest(extractedInvoice?.documentType);
+    if (!typeCheck.ok) {
+      return NextResponse.json({ error: typeCheck.error }, { status: 400 });
+    }
+    // הועלתה קבלה במקום בקשת תשלום → הקובץ ייכתב לשתי העמודות.
+    fillBothColumns = typeCheck.fillBothColumns === true;
+    // אין סיווג (חילוץ AI לא זמין) → עובר (fail-open) אך מסומן לבדיקה.
+    needsTypeReview = typeCheck.needsReview === true;
   }
 
   const result = await createInvoiceItem({
@@ -261,8 +295,9 @@ export async function POST(req: NextRequest) {
     submissionType: voluntarySubmission
       ? INVOICE_SUBMISSION_TYPE.REVIEW
       : INVOICE_SUBMISSION_TYPE.MONTHLY,
-    matchStatus:
-      !voluntarySubmission && invoiceAmountsMatch(reportedAmount, resolvedAmount)
+    matchStatus: needsTypeReview
+      ? INVOICE_MATCH_STATUS.NEEDS_REVIEW
+      : !voluntarySubmission && invoiceAmountsMatch(reportedAmount, resolvedAmount)
         ? INVOICE_MATCH_STATUS.OK
         : INVOICE_MATCH_STATUS.REQUEST_DIFFERENT,
     bankDetails,
@@ -284,14 +319,20 @@ export async function POST(req: NextRequest) {
     documentConfig.kind === "payment_request"
       ? INVOICE_PAYMENT_REQUEST_FILE_COLUMN_ID
       : INVOICE_ACCOUNTING_FILE_COLUMN_ID;
+  // כשהועלתה קבלה בשלב בקשת התשלום — הקובץ נכתב לשתי העמודות.
+  const targetFileColumns = fillBothColumns
+    ? [INVOICE_PAYMENT_REQUEST_FILE_COLUMN_ID, INVOICE_ACCOUNTING_FILE_COLUMN_ID]
+    : [fileColumnId];
   const bankCheckPromise =
     bankDetails || beneficiaryName || bankCode || bankBranch || bankAccount
       ? getArtistBankDetailsFields(session.id)
       : null;
-  const [, current] = await Promise.all([
-    uploadFileToInvoiceColumn(result.id, fileColumnId, file, file.name),
-    bankCheckPromise,
-  ]);
+  // מעלים את הקובץ ראשון (הרשומה לעולם לא צריכה להתקיים בלי הקובץ). ההעלאות
+  // רצות ברצף כדי שאותו File ייקרא נקי לכל בקשת multipart.
+  for (const columnId of targetFileColumns) {
+    await uploadFileToInvoiceColumn(result.id, columnId, file, file.name);
+  }
+  const current = bankCheckPromise ? await bankCheckPromise : null;
 
   const shouldUpdateBankDetails = current
     ? current.legacy !== bankDetails ||

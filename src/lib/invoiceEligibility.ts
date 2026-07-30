@@ -26,6 +26,29 @@ export function getLatestClosedMonthKey(now: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** תנאי התשלום של המערכת: שוטף +60 מסוף חודש האירועים */
+export const PAYMENT_TERMS_DAYS = 60;
+
+/**
+ * שוטף +60: בקשת תשלום נחשבת ששולמה כשעברו 60 יום מסוף חודש האירועים.
+ * מקבלת תאריך חשבונית (YYYY-MM-DD או מפתח חודש YYYY-MM).
+ */
+export function isPaymentRequestConsideredPaid(
+  invoiceDate: string,
+  now: Date = new Date()
+): boolean {
+  const monthKey = parseInvoiceMonthKey(invoiceDate);
+  const match = monthKey.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return false;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  if (month < 1 || month > 12) return false;
+  // new Date(year, month, 0) — היום האחרון של חודש האירועים
+  const paidFrom = new Date(year, month, 0);
+  paidFrom.setDate(paidFrom.getDate() + PAYMENT_TERMS_DAYS);
+  return now >= paidFrom;
+}
+
 export function getInvoiceMonthSubmissionError(
   monthKey: string,
   now: Date = new Date()

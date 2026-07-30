@@ -9,6 +9,7 @@ import {
   getLatestClosedMonthKey,
   isInvoiceMonthClosedForSubmission,
   isInvoiceStatusEligible,
+  isPaymentRequestConsideredPaid,
   INVOICE_MONTH_NOT_CLOSED_ERROR,
   parseInvoiceMonthKey,
 } from "@/lib/invoiceEligibility";
@@ -16,13 +17,10 @@ import {
   getFollowUpAccountingDocument,
   getInitialDocumentForTaxStatus,
   getSubmissionStatusDisplay,
-  getSubitemInvoiceStatusDisplay,
-  INVOICE_SUBMISSION_STATUS,
   isAwaitingAccountingDocument,
   isInvoiceSubmissionComplete,
   isSubitemAwaitingAccounting,
   isSubitemInvoiceComplete,
-  SUBITEM_INVOICE_STATUS,
 } from "@/lib/invoiceDocuments";
 import { invoiceAmountsMatch, validateExtractedAgainstExpected } from "@/lib/invoiceValidation";
 
@@ -145,13 +143,6 @@ function resolveInvoiceForRegistration(
       (inv.orderIds || []).some((id) => String(id) === String(reg.orderId))
     ) ?? null
   );
-}
-
-function resolveInvoiceIdForRegistration(
-  reg: Registration,
-  invoiceList: InvoiceDto[]
-): string {
-  return resolveInvoiceForRegistration(reg, invoiceList)?.id || reg.linkedInvoiceId || "";
 }
 
 function formatDateDDMMYY(dateStr: string): string {
@@ -427,6 +418,12 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     Boolean(artistStatus) &&
     filtered.length === 0 &&
     canSubmitForSelectedMonth;
+  const monthSubmitAvailable =
+    filtered.length > 0 &&
+    selectedMonth !== "all" &&
+    awaitingAccountingRegsInMonth.length === 0 &&
+    readyToSubmitCount > 0 &&
+    canSubmitForSelectedMonth;
   const voluntaryDocumentLabel = "בקשת תשלום";
   const invoicesInSelectedMonth = useMemo(
     () =>
@@ -435,6 +432,26 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         : invoices.filter((inv) => parseInvoiceMonthKey(inv.date) === selectedMonth),
     [invoices, selectedMonth]
   );
+  // בקשת תשלום שהוגשה לחודש הנבחר וטרם הועלה עבורה מסמך חשבונאי
+  const paymentRequestReceivedForSelectedMonth =
+    selectedMonth !== "all" &&
+    (awaitingAccountingRegsInMonth.length > 0 ||
+      invoicesInSelectedMonth.some((inv) => isAwaitingAccountingDocument(inv.submissionStatus)));
+  // שוטף +60: בקשות תשלום שכבר שולמו לפי תנאי התשלום וטרם הועלה עליהן מסמך חשבונאי.
+  // כל עוד יש כאלה — הגשת בקשת תשלום חדשה חסומה.
+  const overduePaymentRequests = useMemo(
+    () =>
+      invoices.filter(
+        (inv) =>
+          isAwaitingAccountingDocument(inv.submissionStatus) &&
+          isPaymentRequestConsideredPaid(inv.date)
+      ),
+    [invoices]
+  );
+  const hasOverduePaymentRequests = overduePaymentRequests.length > 0;
+  // האם התשלום על החודש הנבחר עצמו כבר בוצע לפי שוטף +60
+  const selectedMonthConsideredPaid =
+    selectedMonth !== "all" && isPaymentRequestConsideredPaid(`${selectedMonth}-01`);
 
   const { incomeBySubitemId } = useMemo(() => {
     const byId: Record<string, number> = {};
@@ -678,6 +695,12 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, [artistBankDetails]);
 
   const handleSubmitVoluntaryInvoice = useCallback(async () => {
+    if (hasOverduePaymentRequests) {
+      setError(
+        `לפי תנאי התשלום (שוטף +60), קיימת בקשת תשלום שכבר שולמה — יש להעלות ${followUpAccountingDocument.fileLabel} עליה לפני הגשת בקשה חדשה`
+      );
+      return;
+    }
     const monthError = getInvoiceMonthSubmissionError(selectedMonth);
     if (monthError) {
       setError(monthError);
@@ -767,7 +790,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     extractedActualAmount,
     extractionToken,
     fetchData,
+    followUpAccountingDocument.fileLabel,
     hasCompleteBankDetails,
+    hasOverduePaymentRequests,
     initialDocumentConfig?.fileLabel,
     invoiceFile,
     invoiceForm,
@@ -784,6 +809,12 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     monthLabel: string,
     monthKey: string
   ) => {
+    if (hasOverduePaymentRequests) {
+      setError(
+        `לפי תנאי התשלום (שוטף +60), קיימת בקשת תשלום שכבר שולמה — יש להעלות ${followUpAccountingDocument.fileLabel} עליה לפני הגשת בקשה חדשה`
+      );
+      return;
+    }
     const monthError = getInvoiceMonthSubmissionError(monthKey);
     if (monthError) {
       setError(monthError);
@@ -870,7 +901,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     } finally {
       setSubmittingInvoice(false);
     }
-  }, [customAmountEnabled, customAmountNote, customAmountValue, extractionToken, fetchData, hasCompleteBankDetails, initialDocumentConfig, invoiceFile, invoiceForm, missingBankFields]);
+  }, [customAmountEnabled, customAmountNote, customAmountValue, extractionToken, fetchData, followUpAccountingDocument.fileLabel, hasCompleteBankDetails, hasOverduePaymentRequests, initialDocumentConfig, invoiceFile, invoiceForm, missingBankFields]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -993,41 +1024,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           </div>
         )}
 
-        {!loading && pendingAccountingInvoices.length > 0 && (
-          <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-semibold text-amber-900">
-                  הגשת בקשת תשלום — צריך להגיש {followUpAccountingDocument.fileLabel}
-                </p>
-                <p className="text-sm text-amber-800 mt-1">
-                  לכל חודש יש רשומה נפרדת — העלה {followUpAccountingDocument.fileLabel} לכל חודש בנפרד (לא מסמך אחד לכמה חודשים).
-                </p>
-              </div>
-            </div>
-            <ul className="mt-4 space-y-2 text-sm text-amber-900">
-              {pendingAccountingInvoices.map((inv) => {
-                const invMonthClosed = isInvoiceMonthClosedForSubmission(parseInvoiceMonthKey(inv.date));
-                return (
-                <li key={inv.id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-white/70 px-3 py-2">
-                  <span>{inv.name}</span>
-                  {invMonthClosed ? (
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
-                    onClick={() => openAccountingModal(inv.id)}
-                  >
-                    העלה {followUpAccountingDocument.fileLabel}
-                  </button>
-                  ) : (
-                    <span className="text-xs text-amber-700">{INVOICE_MONTH_NOT_CLOSED_ERROR}</span>
-                  )}
-                </li>
-              )})}
-            </ul>
-          </div>
-        )}
-
         {!loading && (
           <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1056,16 +1052,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 </button>
               ))}
               </div>
-              {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length > 0 && pendingAccountingInvoiceIdForSelectedMonth && canSubmitForSelectedMonth && (
-                <button
-                  type="button"
-                  onClick={() => openAccountingModal(pendingAccountingInvoiceIdForSelectedMonth)}
-                  className="btn-primary inline-flex items-center justify-center gap-2 text-sm"
-                >
-                  העלה {followUpAccountingDocument.fileLabel} לחודש
-                </button>
-              )}
-              {filtered.length > 0 && selectedMonth !== "all" && awaitingAccountingRegsInMonth.length === 0 && readyToSubmitCount > 0 && canSubmitForSelectedMonth && (
+              {monthSubmitAvailable && !hasOverduePaymentRequests && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1093,7 +1080,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   העלה בקשת תשלום לחודש
                 </button>
               )}
-              {showVoluntaryUpload && (
+              {showVoluntaryUpload && !hasOverduePaymentRequests && (
                 <button
                   type="button"
                   onClick={openVoluntaryModal}
@@ -1109,6 +1096,103 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
               </p>
             )}
           </div>
+        )}
+
+        {!loading && hasOverduePaymentRequests && (monthSubmitAvailable || showVoluntaryUpload) && (
+          <div className="mb-6 rounded-2xl border-2 border-rose-300 bg-rose-50 p-5 sm:p-6">
+            <div className="flex items-start gap-3.5">
+              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-rose-600">
+                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </span>
+              <div className="flex-1">
+                <p className="text-lg sm:text-xl font-bold text-rose-900 leading-snug">
+                  לפני שמעלים בקשת תשלום חדשה — יש להשלים {followUpAccountingDocument.fileLabel}
+                </p>
+                <p className="mt-1.5 text-sm sm:text-base text-rose-800 leading-relaxed">
+                  לפי תנאי התשלום (שוטף +60), התשלום על הבקשות הבאות כבר בוצע. כדי להגיש בקשת
+                  תשלום חדשה, יש להעלות עליהן קודם {followUpAccountingDocument.fileLabel}:
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {overduePaymentRequests.map((inv) => (
+                    <li key={inv.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-200 bg-white/70 px-3 py-2 text-sm text-rose-900">
+                      <span>{inv.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => openAccountingModal(inv.id)}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-700"
+                      >
+                        השלם {followUpAccountingDocument.fileLabel} עכשיו
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!loading && paymentRequestReceivedForSelectedMonth && (
+          selectedMonthConsideredPaid ? (
+            <div className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 sm:p-6">
+              <div className="flex items-start gap-3.5">
+                <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-amber-500">
+                  <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </span>
+                <div className="flex-1">
+                  <p className="text-lg sm:text-xl font-bold text-amber-900 leading-snug">
+                    התשלום לחודש {monthKeyToLabel(selectedMonth)} כבר בוצע (שוטף +60) — נשאר להעלות {followUpAccountingDocument.fileLabel}
+                  </p>
+                  <p className="mt-1.5 text-sm sm:text-base text-amber-800 leading-relaxed">
+                    בקשת התשלום לחודש זה התקבלה בהצלחה, ולפי תנאי התשלום היא כבר שולמה. יש
+                    להעלות <span className="font-semibold">{followUpAccountingDocument.fileLabel}</span>{" "}
+                    כדי להשלים את התהליך — בלי זה לא ניתן להגיש בקשות תשלום חדשות.
+                  </p>
+                  {pendingAccountingInvoiceIdForSelectedMonth && canSubmitForSelectedMonth && (
+                    <button
+                      type="button"
+                      onClick={() => openAccountingModal(pendingAccountingInvoiceIdForSelectedMonth)}
+                      className="mt-3 inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-600"
+                    >
+                      העלה {followUpAccountingDocument.fileLabel} עכשיו
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-6 rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-5 sm:p-6">
+              <div className="flex items-start gap-3.5">
+                <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600">
+                  <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </span>
+                <div className="flex-1">
+                  <p className="text-lg sm:text-xl font-bold text-emerald-900 leading-snug">
+                    התקבלה בהצלחה בקשת התשלום לחודש {monthKeyToLabel(selectedMonth)}
+                  </p>
+                  <p className="mt-1.5 text-sm sm:text-base text-emerald-800 leading-relaxed">
+                    לאחר קבלת התשלום, מוזמנים להעלות{" "}
+                    <span className="font-semibold">{followUpAccountingDocument.fileLabel}</span> לחודש זה —
+                    הרשומה הקיימת תתעדכן.
+                  </p>
+                  {pendingAccountingInvoiceIdForSelectedMonth && canSubmitForSelectedMonth && (
+                    <button
+                      type="button"
+                      onClick={() => openAccountingModal(pendingAccountingInvoiceIdForSelectedMonth)}
+                      className="mt-3 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
+                    >
+                      קיבלתי את התשלום — העלה {followUpAccountingDocument.fileLabel}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
         )}
 
         {invoiceSuccess && (
@@ -1139,7 +1223,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 ? "אין אירועים זכאים לחשבונית בטווח שנבחר"
                 : `אין אירועים זכאים לחשבונית ב${monthKeyToLabel(selectedMonth)}`}
             </p>
-            {showVoluntaryUpload && (
+            {showVoluntaryUpload && !hasOverduePaymentRequests && (
               <div className="mt-6 max-w-lg mx-auto space-y-4">
                 <p className="text-sm text-gray-600 leading-relaxed">
                   במידה וחסר מידע במערכת, מוזמנים להעלות{" "}
@@ -1166,54 +1250,18 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">מיקום</th>
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">תאריך</th>
                     <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">סטטוס נוכחות</th>
-                    <th className="px-5 py-3.5 text-xs font-semibold text-gray-600">סטטוס חשבונית</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtered.map((reg) => {
-                    const regOrderId = String(reg.orderId);
-                    const relatedInvoice = resolveInvoiceForRegistration(reg, invoices);
-                    const isSubmitted = isRegistrationInvoiceComplete(reg, invoices);
-                    const awaitingAccountingDoc = isRegistrationAwaitingAccounting(reg, invoices);
-                    const accountingInvoiceId = resolveInvoiceIdForRegistration(reg, invoices);
-                    return (
-                      <tr key={reg.subitemId} className="hover:bg-gray-50/70 transition-colors">
-                        <td className="px-5 py-4 font-medium text-gray-900">{reg.location || reg.orderName || "—"}</td>
-                        <td className="px-5 py-4 text-gray-700 tabular-nums">{formatDateDDMMYY(reg.date)}</td>
-                        <td className="px-5 py-4">
-                          <AttendanceBadge status={reg.attendanceStatus} />
-                        </td>
-                        <td className="px-5 py-4">
-                          {isSubmitted ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                              {SUBITEM_INVOICE_STATUS.SUBMITTED}
-                            </span>
-                          ) : awaitingAccountingDoc ? (
-                            <div className="flex flex-col items-end gap-2">
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 max-w-xs text-right leading-snug">
-                                {getSubitemInvoiceStatusDisplay(SUBITEM_INVOICE_STATUS.PAYMENT_REQUEST)}
-                              </span>
-                              {canSubmitForSelectedMonth && (accountingInvoiceId || reg.linkedInvoiceId) && (
-                                <button
-                                  type="button"
-                                  className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
-                                  onClick={() =>
-                                    openAccountingModal(accountingInvoiceId || reg.linkedInvoiceId || "")
-                                  }
-                                >
-                                  העלה {followUpAccountingDocument.fileLabel}
-                                </button>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200">
-                              {getSubitemInvoiceStatusDisplay(reg.invoiceStatus)}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {filtered.map((reg) => (
+                    <tr key={reg.subitemId} className="hover:bg-gray-50/70 transition-colors">
+                      <td className="px-5 py-4 font-medium text-gray-900">{reg.location || reg.orderName || "—"}</td>
+                      <td className="px-5 py-4 text-gray-700 tabular-nums">{formatDateDDMMYY(reg.date)}</td>
+                      <td className="px-5 py-4">
+                        <AttendanceBadge status={reg.attendanceStatus} />
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
