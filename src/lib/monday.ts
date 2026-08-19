@@ -1145,6 +1145,10 @@ function buildApprovedArtistDateIndex(orders: AdminOrderDto[]): Map<string, Appr
   for (const order of orders) {
     const dateKey = toDateOnlyKey(order.date);
     if (!dateKey) continue;
+    // אירוע מבוטל משחרר את כל המאושרים — הם פנויים שוב, ואסור שאישור על אירוע
+    // מבוטל ייחשב כתפוס באותו תאריך (זה חסם שיבוץ מחדש לאירוע אחר).
+    // "includes" תופס גם "בוטל" וגם "אירוע בוטל".
+    if ((order.status ?? "").includes("בוטל")) continue;
     for (const sub of order.subitems) {
       if ((sub.candidacyStatus ?? "") !== "מאושר") continue;
       const artistKey = getSubitemArtistConflictKey(sub);
