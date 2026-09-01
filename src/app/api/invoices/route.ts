@@ -73,6 +73,20 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // עטיפה כללית: בלעדיה כל חריגה (למשל שגיאת Monday) מחזירה 500 לא-JSON,
+  // והקליינט מציג "שגיאת רשת" גנרית ומטעה.
+  try {
+    return await handleInvoiceSubmit(req);
+  } catch (error) {
+    console.error("Invoice submit error:", error);
+    return NextResponse.json(
+      { error: "שגיאה בהגשת המסמך — נסה שוב, ואם זה חוזר פנה למנהל" },
+      { status: 500 }
+    );
+  }
+}
+
+async function handleInvoiceSubmit(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
 

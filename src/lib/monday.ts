@@ -1838,13 +1838,16 @@ export async function createInvoiceItem(params: {
   }
   colValues[INVOICE_ORDER_IDS_COLUMN_ID] = JSON.stringify(params.orderIds);
 
+  // create_labels_if_missing: תוויות סטטוס (כמו "לבדיקה") עשויות שלא להתקיים
+  // עדיין בעמודה — בלי הדגל Monday דוחה את היצירה כולה וההגשה קורסת.
   const createData = await mondayQuery<{ create_item: { id: string } }>(
     `mutation ($boardId: ID!, $groupId: String!, $itemName: String!, $colValues: JSON!) {
       create_item(
         board_id: $boardId,
         group_id: $groupId,
         item_name: $itemName,
-        column_values: $colValues
+        column_values: $colValues,
+        create_labels_if_missing: true
       ) { id }
     }`,
     {
