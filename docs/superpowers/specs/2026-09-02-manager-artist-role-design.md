@@ -32,8 +32,8 @@
 export type Role = "אומן" | "ODT" | "מנהל" | "מנהל אומן";
 export type RegistrationRole = "אומן" | "ODT";
 
-/** מיפוי label מ-Monday → Role. label לא מוכר/ריק → "אומן". */
-export function parseRoleLabel(label: string | null | undefined): Role;
+/** מיפוי label מ-Monday → Role. label ריק/לא מוכר → null (ראה Guard בסעיף 2). */
+export function parseRoleLabel(label: string | null | undefined): Role | null;
 
 /** מנהל | מנהל אומן */
 export function isAdmin(role: Role): boolean;
@@ -42,7 +42,7 @@ export function isAdmin(role: Role): boolean;
 export function getRegistrationRole(role: Role): RegistrationRole | null;
 ```
 
-`SessionUser.role` הופך ל-`Role`. `parseRoleLabel` מחליף את שלושת העותקים של המיפוי label→role ב-`api/auth/route.ts`, `api/magic-link/route.ts`, ו-`getLiveArtistRole` ב-`monday.ts`.
+`SessionUser.role` הופך ל-`Role`. `parseRoleLabel` מחליף את שלושת העותקים של המיפוי label→role ב-`api/auth/route.ts`, `api/magic-link/route.ts`, ו-`getLiveArtistRole` ב-`monday.ts` — שלושתם זהים היום סמנטית (`מנהל`/`ODT`/אחרת `אומן`), כך שהחילוץ נאמן. בשתי נקודות הכניסה (login, magic-link) נשמרת הברירת-מחדל הקיימת `?? "אומן"`; `getLiveArtistRole` ממשיך להחזיר `null` בכשל, כמו היום.
 
 כל השוואת `role === "מנהל"` / `role !== "מנהל"` בקוד מוחלפת ב-helper לפי הכוונה:
 - **הרשאת ניהול** → `isAdmin(role)`
@@ -54,7 +54,9 @@ export function getRegistrationRole(role: Role): RegistrationRole | null;
 **`src/proxy.ts`**
 - `/admin*` דורש `isAdmin`; אחרת → `/orders`.
 - `/orders*` חוסם רק כש-`getRegistrationRole === null` → `/admin`.
-- השאילתה החיה ל-Monday (שכבר שולפת `color_mm18wjry` סטטוס) שולפת גם `color_mm18btbr` תפקיד. ה-JWT שמונפק מחדש בכל בקשה נכתב עם התפקיד החי (`parseRoleLabel`), כך ששינוי תפקיד ב-Monday נתפס מיד בלי re-login. אם השליפה נכשלת — נשאר התפקיד מה-payload (כמו היום לסטטוס).
+- השאילתה החיה ל-Monday (שכבר שולפת `color_mm18wjry` סטטוס) שולפת גם `color_mm18btbr` תפקיד. ה-JWT שמונפק מחדש בכל בקשה נכתב עם התפקיד החי (`parseRoleLabel`), כך ששינוי תפקיד ב-Monday נתפס מיד בלי re-login.
+
+  **Guard נגד הורדת הרשאות (קריטי):** התפקיד ב-JWT נדרס **רק** כשחזר label לא ריק שמופה לתפקיד מוכר. שליפה שנכשלה, תשובה ריקה, או label לא מוכר — נשארים עם התפקיד מה-payload. בלי זה, כשל רשתי רגעי מול Monday היה מפיל `parseRoleLabel("")` ל-`"אומן"` וזורק מנהל קיים מ-`/admin` באמצע העבודה. לשם כך `parseRoleLabel` מחזיר `Role | null` (null ל-label ריק/לא מוכר), והברירת-מחדל ל-`"אומן"` נשארת רק בנקודות הכניסה (login, magic-link), כפי שהיא היום.
 
 **דפי שרת (`page.tsx`)**
 - `orders`, `my-registrations`, `invoices`: redirect ל-`/admin` כש-`getRegistrationRole === null`.
@@ -66,6 +68,8 @@ export function getRegistrationRole(role: Role): RegistrationRole | null;
 ### 3. הרשמה ותצוגה כאומן
 
 - `api/orders/route.ts`: `registrationRole = getRegistrationRole(session.role)`; `isOdt = registrationRole === "ODT"`; סינון האירועים בסוף לפי `registrationRole` (ODT → `odtRequired > 0`, אומן → `requiredCount > 0`). ה-role refresh הקיים ממשיך לעבוד עם `Role` המורחב.
+
+  **שינוי התנהגות יחיד לתפקיד קיים:** היום הסינון מסתיים ב-`return true`, כך שמנהל שקורא את ה-endpoint ישירות מקבל את **כל** ההזמנות. אחרי השינוי `registrationRole === null` (מנהל רגיל) מקבל רשימה ריקה — עקבי עם היותו חסום מ-`/orders` ב-UI. אין לכך השפעה על אומן/ODT/מנהל אומן.
 - `api/register/route.ts`: `isOdt = getRegistrationRole(session.role) === "ODT"`.
 - `OrdersClient.tsx`: `isOdt` לפי `getRegistrationRole`. `OrderCard`, `NavBar`, `InstructorReportClient` — הרחבת ה-type של `userRole` ל-`Role`.
 
