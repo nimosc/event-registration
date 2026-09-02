@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
+import posthog from "posthog-js";
+import { getRegistrationRole, isAdmin, type Role } from "@/lib/roles";
 
 interface NavBarProps {
   userName: string;
-  userRole: "אומן" | "מנהל" | "ODT";
+  userRole: Role;
   userLocation?: string;
   adminMode?: "candidacy" | "arrival";
 }
@@ -27,10 +29,21 @@ export default function NavBar({ userName, userRole, userLocation, adminMode = "
   const locationText = userLocation?.trim() ? userLocation : "לא מצא";
   const userInitial = userName?.trim()?.[0] ?? "";
 
+  // זיהוי המשתמש המחובר ב-PostHog — כל האירועים משויכים לשם האמן
+  useEffect(() => {
+    if (!process.env.NEXT_PUBLIC_POSTHOG_KEY || !userName?.trim()) return;
+    posthog.identify(userName.trim(), {
+      name: userName.trim(),
+      role: userRole,
+      location: userLocation || "",
+    });
+  }, [userName, userRole, userLocation]);
+
   async function handleLogout() {
     setLoggingOut(true);
     try {
       await fetch("/api/auth", { method: "DELETE" });
+      if (process.env.NEXT_PUBLIC_POSTHOG_KEY) posthog.reset();
       router.push("/");
       router.refresh();
     } catch {
@@ -80,18 +93,22 @@ export default function NavBar({ userName, userRole, userLocation, adminMode = "
     }
   }
 
-  const navLinks =
-    userRole === "מנהל"
-      ? [
-          { href: "/admin", label: "אישור מועמדות", adminMode: "candidacy" as const },
-          { href: "/admin?mode=arrival", label: "אישור הגעה", adminMode: "arrival" as const },
-          { href: "/admin/reports/instructors", label: "דוח פעילות" },
-        ]
-      : [
-          { href: "/orders", label: "הזמנות פתוחות" },
-          { href: "/my-registrations", label: "ההזמנות שלי" },
-          { href: "/invoices", label: "הגשת חשבוניות" },
-        ];
+  // מנהל אומן מקבל את שתי הקבוצות — ניהול וגם אומן
+  const registers = getRegistrationRole(userRole) !== null;
+  const adminLinks = [
+    { href: "/admin", label: "אישור מועמדות", adminMode: "candidacy" as const },
+    { href: "/admin?mode=arrival", label: "אישור הגעה", adminMode: "arrival" as const },
+    { href: "/admin/reports/instructors", label: "דוח פעילות" },
+  ];
+  const artistLinks = [
+    { href: "/orders", label: "הזמנות פתוחות" },
+    { href: "/my-registrations", label: "ההזמנות שלי" },
+    { href: "/invoices", label: "הגשת חשבוניות" },
+  ];
+  const navLinks: Array<{ href: string; label: string; adminMode?: "candidacy" | "arrival" }> = [
+    ...(isAdmin(userRole) ? adminLinks : []),
+    ...(registers ? artistLinks : []),
+  ];
 
   return (
     <nav className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
@@ -152,7 +169,7 @@ export default function NavBar({ userName, userRole, userLocation, adminMode = "
                 </span>
                 <span className="text-[10px] text-gray-400 leading-tight flex items-center gap-0.5">
                   {userRole}
-                  {userRole !== "מנהל" && (
+                  {registers && (
                     <>
                       {" · "}
                       <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -254,14 +271,14 @@ export default function NavBar({ userName, userRole, userLocation, adminMode = "
               </span>
               <span
                 className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                  userRole === "מנהל"
+                  isAdmin(userRole)
                     ? "bg-purple-100 text-purple-700"
                     : "bg-blue-100 text-blue-700"
                 }`}
               >
                 {userRole}
               </span>
-              {userRole !== "מנהל" && (
+              {registers && (
                 <span className="text-xs text-gray-400 flex items-center gap-0.5">
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

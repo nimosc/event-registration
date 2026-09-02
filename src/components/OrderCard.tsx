@@ -22,6 +22,8 @@ export interface Order {
   odtCapacityCeiling: number;
   spotsRemaining: number;
   isRoleOpen: boolean;
+  isRoleFull: boolean;
+  canRegister: boolean;
   isRegistered: boolean;
   subitemId?: string;
   candidacyStatus?: string;
@@ -49,56 +51,21 @@ function formatDateDDMMYYYY(dateStr: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function SpotsBar({
-  roleLabel, approved, required, registered, spotsRemaining, forceDone,
+function RequiredInfo({
+  roleLabel,
+  required,
 }: {
   roleLabel: "ODT" | "אומנים";
-  approved: number;
   required: number;
-  registered: number;
-  spotsRemaining: number;
-  forceDone?: boolean;
 }) {
   if (required <= 0) return null;
-  const isClosed = forceDone || spotsRemaining <= 0;
-  const isAlmostFull = !isClosed && required > 0 && (approved / required) >= 0.75;
-  const percent = Math.min(100, (approved / required) * 100);
-  const barColor =
-    roleLabel === "ODT"
-      ? isClosed
-        ? "bg-red-400"
-        : isAlmostFull
-          ? "bg-orange-300"
-          : "bg-violet-400"
-      : isClosed
-        ? "bg-red-400"
-        : isAlmostFull
-          ? "bg-orange-300"
-          : "bg-blue-400";
-
   return (
-    <div className="mt-3 space-y-1.5">
-      <div className="flex items-center justify-between text-xs gap-2">
-        <span className="font-semibold text-gray-700">
-          <span className={roleLabel === "ODT" ? "text-violet-700" : "text-blue-700"}>{roleLabel}</span>
-          {": "}
-          <span className="text-gray-900">{approved} / {required}</span>
-          <span className="text-gray-400 font-normal"> מאושרים</span>
-          <span className="text-gray-400 font-normal"> · {registered} נרשמו</span>
-        </span>
-        <span className={`font-medium text-left ${isClosed ? "text-red-500" : isAlmostFull ? "text-orange-400" : "text-emerald-600"}`}>
-          {isClosed
-            ? "נסגרה קבלת מועמדויות"
-            : `${spotsRemaining} מקומות פתוחים`}
-        </span>
-      </div>
-
-      <div className="w-full bg-gray-100 rounded-full h-1.5">
-        <div
-          className={`h-1.5 rounded-full transition-all duration-300 ${barColor}`}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+    <div className="mt-3 text-xs text-gray-600">
+      <span className={roleLabel === "ODT" ? "text-violet-700 font-semibold" : "text-blue-700 font-semibold"}>
+        {roleLabel}
+      </span>
+      <span className="text-gray-500">: </span>
+      <span className="font-medium text-gray-800">{required} נדרשים</span>
     </div>
   );
 }
@@ -124,9 +91,9 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
   const [error, setError] = useState<string | null>(null);
 
   const isAssignmentDone = order.status === "הסתיים השיבוץ";
+  const isCandidacyClosed = order.status === "סגירת קבלת מועמדויות";
   const isCancelled = order.status === "בוטל";
   const isApproved = order.candidacyStatus === "מאושר";
-  const isClosedForRole = !order.isRoleOpen;
   const isPast = order.date ? new Date(order.date) < new Date(new Date().toDateString()) : false;
   const formattedDateForTitle = formatDateDDMMYYYY(order.date);
   const titleParts = [order.location, formattedDateForTitle].filter(Boolean);
@@ -153,7 +120,7 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
       isCancelled ? "border-red-200 opacity-75" : order.isRegistered ? (isApproved ? "border-green-200" : "border-blue-200") : "border-gray-100"
     }`}>
       {/* Top accent */}
-      <div className={`h-1 ${isCancelled ? "bg-red-400" : order.isRegistered ? (isApproved ? "bg-green-500" : "bg-blue-500") : isAssignmentDone ? "bg-slate-400" : isClosedForRole ? "bg-gray-300" : "bg-emerald-400"}`} />
+      <div className={`h-1 ${isCancelled ? "bg-red-400" : order.isRegistered ? (isApproved ? "bg-green-500" : "bg-blue-500") : isAssignmentDone || isCandidacyClosed ? "bg-slate-400" : "bg-emerald-400"}`} />
 
       <div className="p-5">
         {/* Cancelled banner */}
@@ -226,13 +193,9 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
         </div>
 
         {/* Spots bar */}
-        <SpotsBar
+        <RequiredInfo
           roleLabel={order.roleLabel}
-          approved={order.roleApproved}
           required={order.roleCapacityCeiling}
-          registered={order.roleApplied}
-          spotsRemaining={order.spotsRemaining}
-          forceDone={isAssignmentDone}
         />
 
         {/* Error */}
@@ -256,6 +219,10 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-slate-100 text-slate-500 text-center">
               הסתיים השיבוץ - לא ניתן להירשם
             </div>
+          ) : isCandidacyClosed ? (
+            <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 text-center">
+              נסגרה קבלת מועמדויות
+            </div>
           ) : order.isRegistered ? (
             <button
               onClick={handleClick}
@@ -269,9 +236,9 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
                 בטל מועמדות
               </>}
             </button>
-          ) : isClosedForRole ? (
+          ) : !order.canRegister ? (
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 text-center">
-              נסגרה קבלת מועמדויות
+              לא ניתן להירשם
             </div>
           ) : (
             <button

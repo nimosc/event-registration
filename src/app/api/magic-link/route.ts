@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mondayQuery, BOARDS, ARTIST_LOCATION_COLUMN_ID, parseDropdownLabel } from "@/lib/monday";
-import { createSession, COOKIE_NAME, SESSION_COOKIE_OPTIONS, SessionUser } from "@/lib/auth";
+import { createSession, COOKIE_NAME, SESSION_COOKIE_OPTIONS, SessionUser, parseRoleLabel, isAdmin } from "@/lib/auth";
 
 interface ArtistItem {
   id: string;
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     }
 
     const roleCol = artist.column_values.find((cv) => cv.id === "color_mm18btbr");
-    const role: SessionUser["role"] = roleCol?.text === "מנהל" ? "מנהל" : roleCol?.text === "ODT" ? "ODT" : "אומן";
+    const role: SessionUser["role"] = parseRoleLabel(roleCol?.text) ?? "אומן";
 
     const locationCol = artist.column_values.find((cv) => cv.id === ARTIST_LOCATION_COLUMN_ID);
 
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     const user: SessionUser = { id: artist.id, name: artist.name, role, status, location };
     const token = await createSession(user);
 
-    const destination = role === "מנהל" ? "/admin" : "/orders";
+    const destination = isAdmin(role) ? "/admin" : "/orders";
     const response = NextResponse.redirect(new URL(destination, request.url));
     response.cookies.set(COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
     return response;

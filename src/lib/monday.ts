@@ -1,3 +1,6 @@
+import { parseRoleLabel } from "./roles";
+import type { RegistrationRole, Role } from "./roles";
+
 const MONDAY_API_URL = "https://api.monday.com/v2";
 const MONDAY_API_TOKEN = process.env.MONDAY_API_TOKEN;
 
@@ -444,9 +447,7 @@ export async function getArtistByIdBasic(
   return { id: artist.id, name: artist.name, statusText };
 }
 
-export async function getLiveArtistRole(
-  artistId: string
-): Promise<"אומן" | "מנהל" | "ODT" | null> {
+export async function getLiveArtistRole(artistId: string): Promise<Role | null> {
   const query = `
     query {
       items(ids: [${artistId}]) {
@@ -461,10 +462,7 @@ export async function getLiveArtistRole(
     const data = await mondayQuery<{ items: { board?: { id: string }; column_values: { text: string }[] }[] }>(query);
     const item = data.items?.[0];
     if (!item || item.board?.id !== String(BOARDS.ARTISTS)) return null;
-    const label = (item.column_values?.[0]?.text || "").trim();
-    if (label === "מנהל") return "מנהל";
-    if (label === "ODT") return "ODT";
-    return "אומן";
+    return parseRoleLabel(item.column_values?.[0]?.text);
   } catch {
     return null;
   }
@@ -539,7 +537,7 @@ export const STATUS_CANDIDACY_CLOSED = "סגירת קבלת מועמדויות";
 export const STATUS_ASSIGNMENT_DONE = "הסתיים השיבוץ";
 export const STATUS_CANCELLED = "בוטל";
 
-export type RegistrationRole = "אומן" | "ODT";
+export type { RegistrationRole };
 
 export interface RoleCapacityState {
   required: number;

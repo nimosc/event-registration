@@ -17,12 +17,13 @@ import {
   getLiveArtistRole,
   getOrderCapacityState,
   isRegistrationOpenForRole,
+  isOrderOpenForRegistration,
   countApprovedCandidaciesForRole,
   getRegisteredCountsFromMondaySubitems,
   getSubitemRegistrationRoleFromMondayColumns,
   registrationRoleToArtistType,
 } from "@/lib/monday";
-import { getSession, createSession, setSessionCookie } from "@/lib/auth";
+import { getSession, createSession, setSessionCookie, getRegistrationRole } from "@/lib/auth";
 
 export interface OrderData {
   id: string;
@@ -48,6 +49,8 @@ export interface OrderData {
   odtCapacityCeiling: number;
   spotsRemaining: number;
   isRoleOpen: boolean;
+  isRoleFull: boolean;
+  canRegister: boolean;
   isRegistered: boolean;
   subitemId?: string;
   candidacyStatus?: string;
@@ -85,6 +88,7 @@ export async function GET() {
       roleRefreshed = true;
     }
 
+    const sessionRegistrationRole = getRegistrationRole(session.role);
     console.log(`[/api/orders] session ok (${session.name}, role: ${session.role})`);
     console.log(`[/api/orders] got ${items.length} items from Monday in ${Date.now() - start}ms`);
     const artistId = parseInt(session.id, 10);
@@ -144,12 +148,15 @@ export async function GET() {
 
         const orderLocation =
           orderLocationCol?.text?.trim() || parseDropdownLabel(orderLocationCol?.value)?.trim() || "";
-        const registrationRole = session.role === "ODT" ? "ODT" : "אומן";
-        const isOdt = session.role === "ODT";
+        const isOdt = sessionRegistrationRole === "ODT";
+        const registrationRole = isOdt ? "ODT" : "אומן";
         const roleState = isOdt ? capacity.odt : capacity.artist;
         const roleCapacityCeiling = roleState.required;
         const roleApproved = roleState.approved;
         const roleApplied = isOdt ? registered.odt : registered.artist;
+        const canRegister =
+          isRegistrationOpenForRole(registrationRole, capacity) &&
+          isOrderOpenForRegistration(status);
 
         return {
           id: item.id,
@@ -170,6 +177,8 @@ export async function GET() {
           artistCapacityCeiling: artistCapacity,
           odtCapacityCeiling: odtCapacity,
           isRoleOpen: isRegistrationOpenForRole(registrationRole, capacity),
+          isRoleFull: roleState.isFull,
+          canRegister,
           spotsRemaining:
             roleCapacityCeiling > 0
               ? Math.max(0, roleCapacityCeiling - roleApproved)
@@ -187,9 +196,10 @@ export async function GET() {
         order.status === STATUS_CANCELLED
       )
       .filter((order) => {
-        if (session.role === "ODT") return order.odtRequired > 0;
-        if (session.role === "אומן") return order.requiredCount > 0;
-        return true;
+        if (sessionRegistrationRole === "ODT") return order.odtRequired > 0;
+        if (sessionRegistrationRole === "אומן") return order.requiredCount > 0;
+        // מנהל ללא תפקיד הרשמה — אין אירועים שהוא יכול להירשם אליהם
+        return false;
       });
 
     console.log(`[/api/orders] returning ${orders.length} orders (total ${Date.now() - start}ms)`);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { getSession, isAdmin } from "@/lib/auth";
 import {
   createSubitem,
   getOpenOrders,
@@ -9,12 +9,7 @@ import {
   getOrderAdminSnapshotById,
   getArtistByIdBasic,
   updateCandidacyConfirmation,
-  STATUS_ASSIGNMENT_DONE,
   STATUS_CANCELLED,
-  getOrderById,
-  getOrderCapacityStateFromMondayItem,
-  getCandidacyOrderStatusFromCapacity,
-  updateOrderStatus,
 } from "@/lib/monday";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
 
@@ -22,7 +17,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
-    if (session.role !== "מנהל") return NextResponse.json({ error: "גישה נדחתה" }, { status: 403 });
+    if (!isAdmin(session.role)) return NextResponse.json({ error: "גישה נדחתה" }, { status: 403 });
 
     const body = (await request.json()) as {
       orderId: string;
@@ -52,9 +47,6 @@ export async function POST(request: NextRequest) {
     if (orderStatus === STATUS_CANCELLED) {
       return NextResponse.json({ error: "לא ניתן לשבץ להזמנה שבוטלה" }, { status: 400 });
     }
-    if (orderStatus === STATUS_ASSIGNMENT_DONE) {
-      return NextResponse.json({ error: "לא ניתן לשבץ להזמנה שבה הסתיים השיבוץ" }, { status: 400 });
-    }
 
     // prevent duplicates for this artist
     const artistIdNum = parseInt(artistId, 10);
@@ -67,18 +59,6 @@ export async function POST(request: NextRequest) {
     const subitem = await createSubitem(orderId, artistBasic.name, artistBasic.id);
     // Mark candidacy as approved since this is an admin assignment.
     await updateCandidacyConfirmation(subitem.id, "מאושר");
-
-    const liveOrder = await getOrderById(orderId);
-    if (liveOrder) {
-      const capacityAfterAssign = getOrderCapacityStateFromMondayItem(liveOrder);
-      const desiredCandidacyStatus = getCandidacyOrderStatusFromCapacity(
-        capacityAfterAssign,
-        orderStatus
-      );
-      if (desiredCandidacyStatus !== orderStatus) {
-        await updateOrderStatus(orderId, desiredCandidacyStatus);
-      }
-    }
 
     const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
     if (webhookUrl) {

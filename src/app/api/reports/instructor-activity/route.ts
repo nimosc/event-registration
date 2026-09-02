@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { getSession, isAdmin } from "@/lib/auth";
 import { getInstructorActivityData } from "@/lib/instructorReport";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export async function GET() {
       return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
     }
 
-    if (session.role !== "מנהל") {
+    if (!isAdmin(session.role)) {
       return NextResponse.json({ error: "גישה נדחתה" }, { status: 403 });
     }
 

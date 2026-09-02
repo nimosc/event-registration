@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mondayQuery, BOARDS, getOrderAdminSnapshotById } from "@/lib/monday";
-import { getSession } from "@/lib/auth";
+import { getSession, isAdmin } from "@/lib/auth";
 
 type MondayColumnDef = { id: string; title: string; type: string };
 
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
-    if (session.role !== "מנהל") return NextResponse.json({ error: "גישה נדחתה" }, { status: 403 });
+    if (!isAdmin(session.role)) return NextResponse.json({ error: "גישה נדחתה" }, { status: 403 });
 
     const orderId = request.nextUrl.searchParams.get("orderId");
     if (!orderId) return NextResponse.json({ error: "חסר orderId" }, { status: 400 });

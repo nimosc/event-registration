@@ -7,11 +7,10 @@ import {
   getColumnValue,
   parseLinkedItemIds,
   STATUS_CANCELLED,
-  getOrderCapacityState,
-  isRegistrationOpenForRole,
-  getApprovedCountsFromMondaySubitems,
+  STATUS_ASSIGNMENT_DONE,
+  STATUS_CANDIDACY_CLOSED,
 } from "@/lib/monday";
-import { getSession } from "@/lib/auth";
+import { getSession, getRegistrationRole } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,6 +49,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (status === STATUS_ASSIGNMENT_DONE) {
+      return NextResponse.json(
+        { error: "הסתיים השיבוץ — לא ניתן להגיש מועמדות" },
+        { status: 400 }
+      );
+    }
+
+    if (status === STATUS_CANDIDACY_CLOSED) {
+      return NextResponse.json(
+        { error: "נסגרה קבלת מועמדויות להזמנה זו" },
+        { status: 400 }
+      );
+    }
+
     const dateCol = getColumnValue(order, "date_mm18mqn2");
     const eventDate = dateCol?.text ? new Date(dateCol.text) : null;
     if (eventDate && eventDate < new Date(new Date().toDateString())) {
@@ -59,28 +72,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const isOdt = session.role === "ODT";
-
-    const requiredCol = getColumnValue(order, "numeric_mm185aw7");
-    const requiredOdtCol = getColumnValue(order, "numeric_mm387qc7");
-
-    const requiredCount = parseFloat(requiredCol?.text || "0") || 0;
-    const requiredOdtCount = parseFloat(requiredOdtCol?.text || "0") || 0;
-    const approved = getApprovedCountsFromMondaySubitems(order.subitems || []);
-    const capacity = getOrderCapacityState(
-      requiredCount,
-      approved.artist,
-      requiredOdtCount,
-      approved.odt
-    );
-    const roleForCapacity = isOdt ? "ODT" : "אומן";
-
-    if (!isRegistrationOpenForRole(roleForCapacity, capacity)) {
+    const registrationRole = getRegistrationRole(session.role);
+    if (registrationRole === null) {
       return NextResponse.json(
-        { error: "נסגרה קבלת מועמדויות להזמנה זו" },
-        { status: 400 }
+        { error: "תפקידך אינו מאפשר הגשת מועמדות" },
+        { status: 403 }
       );
     }
+    const isOdt = registrationRole === "ODT";
 
     // Check if already submitted candidacy
     const artistId = parseInt(session.id, 10);

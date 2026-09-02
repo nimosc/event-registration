@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAllArtists, getColumnValue, ARTIST_LOCATION_COLUMN_ID, parseDropdownLabel } from "@/lib/monday";
-import { createSession, setSessionCookie, clearSessionCookie, SessionUser } from "@/lib/auth";
+import { createSession, setSessionCookie, clearSessionCookie, SessionUser, parseRoleLabel } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   const start = Date.now();
@@ -50,8 +50,7 @@ export async function POST(request: NextRequest) {
     // Get system role
     const roleCol = getColumnValue(artist, "color_mm18btbr");
     const roleLabel = roleCol?.text || "";
-    const role: SessionUser["role"] =
-      roleLabel === "מנהל" ? "מנהל" : roleLabel === "ODT" ? "ODT" : "אומן";
+    const role: SessionUser["role"] = parseRoleLabel(roleLabel) ?? "אומן";
 
     const locationCol = getColumnValue(artist, ARTIST_LOCATION_COLUMN_ID);
     const location =

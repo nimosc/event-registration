@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import OrderCard, { Order } from "@/components/OrderCard";
 import { SessionUser } from "@/lib/auth";
+import { getRegistrationRole } from "@/lib/roles";
 
 interface OrdersClientProps {
   user: SessionUser;
@@ -281,7 +282,7 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     if (!res.ok) throw new Error(data.error || "שגיאה בהגשת המועמדות");
     setOrders(prev => prev.map(o => {
       if (o.id !== orderId) return o;
-      const isOdt = user.role === "ODT";
+      const isOdt = getRegistrationRole(user.role) === "ODT";
       const newRoleApplied = o.roleApplied + 1;
       return {
         ...o,
@@ -323,14 +324,15 @@ export default function OrdersClient({ user }: OrdersClientProps) {
       !o.isRegistered &&
       o.status !== "הסתיים השיבוץ" &&
       o.status !== "בוטל" &&
-      o.isRoleOpen
+      o.status !== "סגירת קבלת מועמדויות" &&
+      o.canRegister
   );
   const closedOrders = filteredOrders.filter(
     (o) =>
       !o.isRegistered &&
-      o.status !== "הסתיים השיבוץ" &&
       o.status !== "בוטל" &&
-      !o.isRoleOpen
+      o.status !== "הסתיים השיבוץ" &&
+      !o.canRegister
   );
 
   const greeting = () => {

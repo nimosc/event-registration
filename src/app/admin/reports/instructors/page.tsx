@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { getSession, isAdmin } from "@/lib/auth";
 import InstructorReportClient from "./InstructorReportClient";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,7 @@ export default async function InstructorReportPage() {
   if (!session) {
     redirect("/");
   }
-  if (session.role !== "מנהל") {
+  if (!isAdmin(session.role)) {
     redirect("/orders");
   }
 

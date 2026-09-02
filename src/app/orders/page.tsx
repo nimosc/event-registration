@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { getSession, getRegistrationRole } from "@/lib/auth";
 import OrdersClient from "./OrdersClient";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ export default async function OrdersPage() {
     redirect("/");
   }
 
-  if (session.role === "מנהל") {
+  if (getRegistrationRole(session.role) === null) {
     redirect("/admin");
   }
 

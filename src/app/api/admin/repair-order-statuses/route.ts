@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { getSession, isAdmin } from "@/lib/auth";
 import { restoreOrderStatusesFromActivityLogs } from "@/lib/monday";
 
 export async function POST() {
@@ -8,7 +8,7 @@ export async function POST() {
     if (!session) {
       return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
     }
-    if (session.role !== "מנהל") {
+    if (!isAdmin(session.role)) {
       return NextResponse.json({ error: "גישה נדחתה" }, { status: 403 });
     }
 

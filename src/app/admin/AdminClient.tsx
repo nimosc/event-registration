@@ -573,12 +573,14 @@ function AssignArtistControls({
 function OrderAccordion({
   order,
   onConfirm,
+  onRegistrationToggle,
   statusMode,
   onRefresh,
 }: {
   order: AdminOrder;
   statusMode: "candidacy" | "arrival";
   onRefresh: () => Promise<void>;
+  onRegistrationToggle: (orderId: string, open: boolean) => Promise<void>;
   onConfirm: (
     orderId: string,
     subitemId: string,
@@ -588,9 +590,13 @@ function OrderAccordion({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [togglingRegistration, setTogglingRegistration] = useState(false);
+  const [confirmRegistrationToggle, setConfirmRegistrationToggle] = useState(false);
   const [categoryView, setCategoryView] = useState<CategoryView>("all");
   const titleParts = [order.location, formatDateDDMMYYYY(order.date)].filter(Boolean);
   const orderTitle = titleParts.length > 0 ? titleParts.join(" | ") : order.name;
+  const isRegistrationClosed = order.status === "הסתיים השיבוץ";
+  const isCancelled = order.status === "בוטל";
 
   async function handleDownloadExcel(e: React.MouseEvent) {
     e.stopPropagation();
@@ -640,6 +646,25 @@ function OrderAccordion({
       alert("שגיאה בהורדת האקסל: " + (err instanceof Error ? err.message : "שגיאה לא ידועה"));
     } finally {
       setDownloading(false);
+    }
+  }
+
+  function handleRegistrationToggleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (togglingRegistration || isCancelled) return;
+    setConfirmRegistrationToggle(true);
+  }
+
+  async function handleRegistrationToggleConfirm() {
+    if (togglingRegistration || isCancelled) return;
+    setTogglingRegistration(true);
+    try {
+      await onRegistrationToggle(order.id, isRegistrationClosed);
+      setConfirmRegistrationToggle(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "שגיאה בעדכון סטטוס ההרשמה");
+    } finally {
+      setTogglingRegistration(false);
     }
   }
 
@@ -808,6 +833,33 @@ function OrderAccordion({
           </div>
 
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            {!isCancelled && (
+              <button
+                onClick={handleRegistrationToggleClick}
+                disabled={togglingRegistration}
+                title={isRegistrationClosed ? "פתח הרשמה" : "סגור הרשמה"}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors disabled:opacity-50 ${
+                  isRegistrationClosed
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                    : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                }`}
+              >
+                {togglingRegistration ? (
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                ) : isRegistrationClosed ? (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                  </svg>
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                )}
+                {isRegistrationClosed ? "פתח הרשמה" : "סגור הרשמה"}
+              </button>
+            )}
             <button
               onClick={handleDownloadExcel}
               disabled={downloading}
@@ -859,6 +911,49 @@ function OrderAccordion({
             statusMode={statusMode}
             onConfirm={(subitemId, action) => onConfirm(order.id, subitemId, action, statusMode)}
           />
+        </div>
+      )}
+
+      {confirmRegistrationToggle && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={() => !togglingRegistration && setConfirmRegistrationToggle(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-gray-200 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 className="text-base font-semibold text-gray-900 mb-2">
+              {isRegistrationClosed ? "פתיחת הרשמה" : "סגירת הרשמה"}
+            </h4>
+            <p className="text-sm text-gray-600 leading-relaxed mb-6">
+              {isRegistrationClosed
+                ? "האם אתה בטוח שברצונך לפתוח את ההרשמה לאירוע זה?"
+                : "האם אתה בטוח שברצונך לסגור את ההרשמה לאירוע זה?"}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirmRegistrationToggle(false)}
+                disabled={togglingRegistration}
+                className="btn-secondary text-sm disabled:opacity-50"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={handleRegistrationToggleConfirm}
+                disabled={togglingRegistration}
+                className={`text-sm disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-xl font-medium text-white transition-colors ${
+                  isRegistrationClosed
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-slate-700 hover:bg-slate-800"
+                }`}
+              >
+                {togglingRegistration ? "מעדכן..." : isRegistrationClosed ? "פתח הרשמה" : "סגור הרשמה"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1104,28 +1199,29 @@ export default function AdminClient({ user }: AdminClientProps) {
             : sub
         );
 
-        const confirmedCount =
-          mode === "arrival"
-            ? updatedSubitems.filter((s) => s.attendanceStatus === "מאושר").length
-            : updatedSubitems.filter((s) => (s.candidacyStatus ?? "") === "מאושר").length;
-
-        let newStatus = order.status;
-        if (
-          mode === "candidacy" &&
-          action === "confirm" &&
-          order.requiredCount > 0 &&
-          confirmedCount >= order.requiredCount
-        ) {
-          newStatus = "הסתיים השיבוץ";
-        } else if (mode === "candidacy" && action === "reject" && order.status === "הסתיים השיבוץ") {
-          newStatus = "סגירת קבלת מועמדויות";
-        }
-
-        return { ...order, subitems: updatedSubitems, status: newStatus };
+        return { ...order, subitems: updatedSubitems };
       });
 
       return recomputeCandidacyDateConflicts(updated);
     });
+  }
+
+  async function handleRegistrationToggle(orderId: string, open: boolean) {
+    const res = await fetch("/api/admin/registration", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId, open }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "שגיאה בעדכון סטטוס ההרשמה");
+    }
+
+    setOrders((prev) =>
+      prev.map((order) =>
+        order.id === orderId ? { ...order, status: data.status } : order
+      )
+    );
   }
 
   // Filter and search
@@ -1321,6 +1417,7 @@ export default function AdminClient({ user }: AdminClientProps) {
                 key={order.id}
                 order={order}
                 onConfirm={handleConfirm}
+                onRegistrationToggle={handleRegistrationToggle}
                 statusMode={statusMode}
                 onRefresh={fetchOrders}
               />

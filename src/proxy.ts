@@ -6,11 +6,13 @@ import {
   SESSION_COOKIE_OPTIONS,
   SessionUser,
 } from "@/lib/auth";
+import { getRegistrationRole, isAdmin, parseRoleLabel, type Role } from "@/lib/roles";
 const PROTECTED_ROUTES = ["/orders", "/my-registrations", "/admin"];
 const ADMIN_ROUTES = ["/admin"];
 const MONDAY_API_URL = "https://api.monday.com/v2";
 const ARTISTS_BOARD_ID = 5092847546;
 const ARTIST_ACTIVE_STATUS_COLUMN_ID = "color_mm18wjry";
+const ARTIST_ROLE_COLUMN_ID = "color_mm18btbr";
 
 function getSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
@@ -24,7 +26,13 @@ function getMondayToken(): string | null {
   return token.startsWith("Bearer ") ? token : `Bearer ${token}`;
 }
 
-async function getLiveArtistStatus(artistId: string): Promise<string | null> {
+/**
+ * סטטוס ותפקיד חיים מ-Monday. כל שדה עשוי לחזור null — הקורא נשאר אז
+ * עם הערך שב-JWT, כדי שכשל רגעי מול Monday לא יוריד הרשאות למשתמש.
+ */
+async function getLiveArtistProfile(
+  artistId: string
+): Promise<{ status: string | null; role: Role | null } | null> {
   const authHeader = getMondayToken();
   if (!authHeader) return null;
 
@@ -33,7 +41,8 @@ async function getLiveArtistStatus(artistId: string): Promise<string | null> {
       items(ids: [${artistId}]) {
         id
         board { id }
-        column_values(ids: ["${ARTIST_ACTIVE_STATUS_COLUMN_ID}"]) {
+        column_values(ids: ["${ARTIST_ACTIVE_STATUS_COLUMN_ID}", "${ARTIST_ROLE_COLUMN_ID}"]) {
+          id
           text
         }
       }
@@ -54,12 +63,21 @@ async function getLiveArtistStatus(artistId: string): Promise<string | null> {
     if (!res.ok) return null;
     const data = (await res.json()) as {
       data?: {
-        items?: { board?: { id: string }; column_values?: { text?: string }[] }[];
+        items?: {
+          board?: { id: string };
+          column_values?: { id?: string; text?: string }[];
+        }[];
       };
     };
     const item = data.data?.items?.[0];
     if (!item || item.board?.id !== String(ARTISTS_BOARD_ID)) return null;
-    return (item.column_values?.[0]?.text || "").trim();
+    const columns = item.column_values ?? [];
+    const textOf = (id: string) =>
+      (columns.find((cv) => cv.id === id)?.text || "").trim();
+    return {
+      status: textOf(ARTIST_ACTIVE_STATUS_COLUMN_ID) || null,
+      role: parseRoleLabel(textOf(ARTIST_ROLE_COLUMN_ID)),
+    };
   } catch {
     return null;
   }
@@ -92,8 +110,8 @@ export async function proxy(request: NextRequest) {
       pathname.startsWith(route)
     );
 
-    const liveStatus = await getLiveArtistStatus(String(payload.id ?? ""));
-    const effectiveStatus = liveStatus || String(payload.status ?? "").trim();
+    const live = await getLiveArtistProfile(String(payload.id ?? ""));
+    const effectiveStatus = live?.status || String(payload.status ?? "").trim();
 
     if (effectiveStatus !== "פעיל") {
       const loginUrl = new URL("/", request.url);
@@ -101,11 +119,17 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    if (isAdminRoute && payload.role !== "מנהל") {
+    // תפקיד חי גובר, אבל רק כשנקרא בהצלחה — אחרת נשארים עם מה שב-JWT
+    const effectiveRole = live?.role ?? (payload.role as Role);
+
+    if (isAdminRoute && !isAdmin(effectiveRole)) {
       return NextResponse.redirect(new URL("/orders", request.url));
     }
 
-    if (pathname.startsWith("/orders") && payload.role === "מנהל") {
+    if (
+      pathname.startsWith("/orders") &&
+      getRegistrationRole(effectiveRole) === null
+    ) {
       return NextResponse.redirect(new URL("/admin", request.url));
     }
 
@@ -113,7 +137,7 @@ export async function proxy(request: NextRequest) {
     const user: SessionUser = {
       id: String(payload.id ?? ""),
       name: String(payload.name ?? ""),
-      role: payload.role as SessionUser["role"],
+      role: effectiveRole,
       status: String(payload.status ?? ""),
       location: payload.location as string | undefined,
     };

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { getSession, isAdmin } from "@/lib/auth";
 import AdminClient from "./AdminClient";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export default async function AdminPage() {
     redirect("/");
   }
 
-  if (session.role !== "מנהל") {
+  if (!isAdmin(session.role)) {
     redirect("/orders");
   }
 

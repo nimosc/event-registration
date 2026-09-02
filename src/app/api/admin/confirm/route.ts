@@ -3,14 +3,10 @@ import {
   updateAttendanceConfirmation,
   updateCandidacyConfirmation,
   getOrderAdminSnapshotById,
-  getOrderById,
   getArtistByIdBasic,
   getCandidacyDateConflictForSubitem,
-  updateOrderStatus,
-  getCandidacyOrderStatusFromCapacity,
-  getOrderCapacityStateFromMondayItem,
 } from "@/lib/monday";
-import { getSession } from "@/lib/auth";
+import { getSession, isAdmin } from "@/lib/auth";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
 
 export async function PATCH(request: NextRequest) {
@@ -20,7 +16,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
     }
 
-    if (session.role !== "מנהל") {
+    if (!isAdmin(session.role)) {
       return NextResponse.json({ error: "גישה נדחתה" }, { status: 403 });
     }
 
@@ -63,22 +59,6 @@ export async function PATCH(request: NextRequest) {
 
       const orderDto = await getOrderAdminSnapshotById(orderId);
       if (orderDto) {
-        const { status: currentStatus } = orderDto;
-        let nextStatus = currentStatus;
-
-        const liveOrder = await getOrderById(orderId);
-        if (liveOrder) {
-          const capacity = getOrderCapacityStateFromMondayItem(liveOrder);
-          const desiredStatus = getCandidacyOrderStatusFromCapacity(
-            capacity,
-            currentStatus
-          );
-          if (desiredStatus !== currentStatus) {
-            await updateOrderStatus(orderId, desiredStatus);
-            nextStatus = desiredStatus;
-          }
-        }
-
         const webhookUrl = process.env.ADMIN_CANDIDACY_APPROVED_WEBHOOK_URL?.trim();
         if (webhookUrl) {
           const registration = orderDto.subitems.find((s) => s.id === subitemId);
@@ -93,7 +73,7 @@ export async function PATCH(request: NextRequest) {
               event: action === "confirm" ? "candidacy_approved" : "candidacy_rejected",
               decidedAt: new Date().toISOString(),
               admin: { id: session.id, name: session.name },
-              order: { ...orderDto, status: nextStatus },
+              order: orderDto,
               registration,
               artist,
             });

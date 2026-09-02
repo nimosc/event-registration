@@ -1,5 +1,9 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import type { Role } from "./roles";
+
+export { parseRoleLabel, isAdmin, getRegistrationRole } from "./roles";
+export type { Role, RegistrationRole } from "./roles";
 
 const COOKIE_NAME = "session";
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -16,7 +20,7 @@ export const SESSION_COOKIE_OPTIONS = {
 export interface SessionUser {
   id: string;
   name: string;
-  role: "אומן" | "מנהל" | "ODT";
+  role: Role;
   status: string;
   location?: string;
 }
@@ -47,7 +51,7 @@ export async function verifySession(token: string): Promise<SessionUser | null> 
     return {
       id: payload.id as string,
       name: payload.name as string,
-      role: payload.role as "אומן" | "מנהל" | "ODT",
+      role: payload.role as Role,
       status: (payload.status as string) || "",
       location: payload.location as string | undefined,
     };
