@@ -35,6 +35,8 @@ export const INVOICE_SUBMISSION_STATUS_COLUMN_ID = "color_mm4699gb"; // סטטו
 export const INVOICE_PAYMENT_REQUEST_NUMBER_COLUMN_ID = "text_mm50g77q"; // מספר בקשת תשלום
 export const INVOICE_SUBMISSION_TYPE_COLUMN_ID = "color_mm5051wy";        // סוג הגשה: בקשת תשלום חודשית / בקשה לבדיקה
 export const INVOICE_MATCH_STATUS_COLUMN_ID = "color_mm50n91j"; // סטטוס התאמה: תקין / בקשת תשלום שונה / קבלה שונה מהבקשת תשלום
+/** שם האומן כטקסט פשוט — מאפשר Group by לפי אומן בתצוגות Monday (עמודת קישור אינה ניתנת לקיבוץ) */
+export const INVOICE_ARTIST_NAME_COLUMN_ID = "text_mm6tp6dh";
 
 export interface MondayColumnValue {
   id: string;
@@ -1804,6 +1806,7 @@ export async function createInvoiceItem(params: {
   const groupId = await ensureInvoiceMonthGroup(BOARDS.INVOICES, groupTitle);
 
   const colValues: Record<string, unknown> = {};
+  if (params.artistName) colValues[INVOICE_ARTIST_NAME_COLUMN_ID] = params.artistName;
   const invoiceDate =
     monthKeyToInvoiceGroupTitle(params.monthKey) != null
       ? `${params.monthKey.trim()}-01`
