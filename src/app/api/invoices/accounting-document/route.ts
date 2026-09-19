@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sha256OfFile, verifyExtractionToken } from "@/lib/extractionToken";
+import { BlobAccessError, BlobNotFoundError, deleteInvoiceBlobQuietly, downloadInvoiceBlob } from "@/lib/blobUpload";
+import { serializePendingBlob } from "@/lib/invoicePendingBlob";
 import {
   getArtistTaxStatus,
   getColumnValue,
   getInvoiceItemForArtist,
   linkSubitemsToInvoice,
   markSubitemsInvoiceSubmitted,
-  uploadFileToInvoiceColumn,
+  attachInvoiceFileWithRetry,
+  setInvoiceFileState,
+  INVOICE_FILE_STATUS,
   updateInvoiceSubmissionStatus,
   updateInvoiceMatchStatus,
   updateInvoiceAccountingDetails,
@@ -45,17 +49,31 @@ export async function POST(req: NextRequest) {
 
     const artistId = parseInt(session.id, 10);
 
-    const formData = await req.formData();
-    const invoiceId = String(formData.get("invoiceId") ?? "").trim();
-    const file = formData.get("file") as File | null;
-    const invoiceNumber = (formData.get("invoiceNumber") as string) || "";
-    const extractionToken = (formData.get("extractionToken") as string) || "";
+    const body = (await req.json().catch(() => ({}))) as {
+      invoiceId?: string;
+      blobUrl?: string;
+      invoiceNumber?: string;
+      extractionToken?: string;
+    };
+    const invoiceId = String(body.invoiceId ?? "").trim();
+    const blobUrl = String(body.blobUrl ?? "").trim();
+    const invoiceNumber = String(body.invoiceNumber ?? "");
+    const extractionToken = String(body.extractionToken ?? "");
 
     if (!invoiceId) {
       return NextResponse.json({ error: "חסר מזהה חשבונית" }, { status: 400 });
     }
-    if (!file || file.size === 0) {
+    if (!blobUrl) {
       return NextResponse.json({ error: "חובה לצרף מסמך חשבונאי" }, { status: 400 });
+    }
+    // הקובץ כבר ב-Vercel Blob (העלאה ישירה מהדפדפן) — מורידים אותו לעיבוד.
+    let file: File;
+    try {
+      file = await downloadInvoiceBlob(blobUrl, session.id);
+    } catch (err) {
+      if (err instanceof BlobAccessError) return NextResponse.json({ error: err.message }, { status: 403 });
+      if (err instanceof BlobNotFoundError) return NextResponse.json({ error: err.message }, { status: 400 });
+      throw err;
     }
     if (!invoiceNumber.trim()) {
       return NextResponse.json({ error: "חובה למלא מספר חשבונית / קבלה" }, { status: 400 });
@@ -160,21 +178,42 @@ export async function POST(req: NextRequest) {
     // אין סיווג (חילוץ AI לא זמין) → עובר (fail-open) אך מסומן לבדיקה.
     const needsTypeReview = typeCheck.needsReview === true;
 
-    // Upload first (the completed status must never exist without the file),
-    // then the independent metadata writes run in parallel.
-    await uploadFileToInvoiceColumn(invoiceId, INVOICE_ACCOUNTING_FILE_COLUMN_ID, file, file.name);
+    // המטא-דאטה נכתב תמיד; סטטוס "הוגש מסמך חשבונאי" נקבע רק אם הקובץ צורף
+    // בפועל (הסטטוס לא יתקיים בלי קובץ). כשל צירוף → "קובץ חסר" + blob נשמר
+    // לניסיון חוזר, שגם יקבע את הסטטוס.
     await Promise.all([
       updateInvoiceAccountingDetails(invoiceId, {
         invoiceNumber: invoiceNumber.trim(),
         extractedAmount: extracted?.amount ?? undefined,
       }),
-      updateInvoiceSubmissionStatus(invoiceId, accountingDocument.submissionStatus),
       needsTypeReview
         ? updateInvoiceMatchStatus(invoiceId, INVOICE_MATCH_STATUS.NEEDS_REVIEW)
         : receiptAmountMismatch
           ? updateInvoiceMatchStatus(invoiceId, INVOICE_MATCH_STATUS.RECEIPT_DIFFERENT)
           : Promise.resolve(),
     ]);
+
+    let fileAttached = true;
+    try {
+      await attachInvoiceFileWithRetry(invoiceId, [INVOICE_ACCOUNTING_FILE_COLUMN_ID], file, file.name);
+      await Promise.all([
+        updateInvoiceSubmissionStatus(invoiceId, accountingDocument.submissionStatus),
+        setInvoiceFileState(invoiceId, { status: INVOICE_FILE_STATUS.ATTACHED, pendingBlobUrl: "" }),
+      ]);
+      after(() => deleteInvoiceBlobQuietly(blobUrl));
+    } catch (err) {
+      fileAttached = false;
+      console.error(`[invoice ${invoiceId}] accounting file attach failed, marking pending:`, err);
+      await setInvoiceFileState(invoiceId, {
+        status: INVOICE_FILE_STATUS.MISSING,
+        pendingBlobUrl: serializePendingBlob({
+          url: blobUrl,
+          columns: [INVOICE_ACCOUNTING_FILE_COLUMN_ID],
+          thenSubmissionStatus: accountingDocument.submissionStatus,
+        }),
+      });
+      return NextResponse.json({ success: true, invoiceId, fileAttached });
+    }
 
     // Subitem bookkeeping runs after the response is sent.
     after(async () => {
@@ -196,6 +235,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       invoiceId,
+      fileAttached,
       submissionStatus: INVOICE_SUBMISSION_STATUS.ACCOUNTING,
     });
   } catch (error) {

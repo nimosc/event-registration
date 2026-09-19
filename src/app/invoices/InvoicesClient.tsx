@@ -24,6 +24,8 @@ import {
 } from "@/lib/invoiceDocuments";
 import { invoiceAmountsMatch, validateExtractedAgainstExpected } from "@/lib/invoiceValidation";
 import { prepareInvoiceFile, FileTooLargeError } from "@/lib/prepareInvoiceFile";
+import { uploadInvoiceFileToBlob, describeUploadError } from "@/lib/blobClient";
+import { postJson } from "@/lib/postJson";
 
 interface Registration {
   orderId: string;
@@ -56,6 +58,25 @@ interface InvoiceDto {
   description: string;
   orderIds: string[];
   submissionStatus: string;
+  fileStatus?: string;
+}
+
+/** תשובת /api/invoices ו-/accounting-document */
+interface InvoiceSubmitResponse {
+  success?: boolean;
+  invoiceId?: string;
+  /** false = הרשומה נוצרה אבל הקובץ לא צורף ל-Monday (ניתן לצרף שוב) */
+  fileAttached?: boolean;
+  /** true = אותה הגשה כבר נקלטה קודם — לא נוצרה כפילות */
+  duplicate?: boolean;
+}
+
+function submitOutcomeMessage(data: InvoiceSubmitResponse, defaultMessage: string): string {
+  if (data.fileAttached === false) {
+    return "הרשומה נקלטה, אך צירוף הקובץ ל-Monday נכשל — ניתן לצרף שוב מרשימת החשבוניות";
+  }
+  if (data.duplicate) return "ההגשה הזו כבר נקלטה קודם — לא נוצרה רשומה כפולה";
+  return defaultMessage;
 }
 
 interface InvoicesClientProps {
@@ -219,6 +240,11 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   const [extractionToken, setExtractionToken] = useState("");
   const [accountingExtractionToken, setAccountingExtractionToken] = useState("");
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  /** URL ב-Vercel Blob אחרי העלאה ישירה — זה מה שנשלח לשרת, לא הקובץ */
+  const [invoiceBlobUrl, setInvoiceBlobUrl] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [accountingBlobUrl, setAccountingBlobUrl] = useState("");
+  const [accountingUploadProgress, setAccountingUploadProgress] = useState<number | null>(null);
   const [customAmountEnabled, setCustomAmountEnabled] = useState(false);
   const [customAmountValue, setCustomAmountValue] = useState("");
   const [customAmountNote, setCustomAmountNote] = useState("");
@@ -311,7 +337,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         // אחסון מלא/חסום — הקאש אופציונלי
       }
     } catch {
-      setError("שגיאת רשת.");
+      setError("שגיאת רשת — בדוק את החיבור ונסה שוב.");
     } finally {
       setLoading(false);
     }
@@ -476,6 +502,27 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [submittingInvoice, submittingAccounting]);
 
+  const [retryingFileId, setRetryingFileId] = useState("");
+  /** צירוף חוזר של קובץ שההגשה שלו נקלטה אבל הצירוף ל-Monday נכשל */
+  const handleRetryFile = useCallback(async (invoiceId: string) => {
+    setRetryingFileId(invoiceId);
+    setError(null);
+    try {
+      const { ok, data } = await postJson<InvoiceSubmitResponse>("/api/invoices/retry-file", { invoiceId });
+      if (!ok) {
+        setError(data.error || "צירוף הקובץ נכשל — נסה שוב");
+        return;
+      }
+      setInvoiceSuccess("הקובץ צורף בהצלחה");
+      setTimeout(() => setInvoiceSuccess(null), 5000);
+      void fetchData();
+    } catch {
+      setError("שגיאת רשת — בדוק את החיבור ונסה שוב.");
+    } finally {
+      setRetryingFileId("");
+    }
+  }, [fetchData]);
+
   const handleTaxStatusChange = useCallback(async (taxStatus: "מורשה" | "פטור") => {
     if (taxStatus === artistStatus || savingTaxStatus) return;
     setSavingTaxStatus(true);
@@ -502,6 +549,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
 
   const handleFileChange = useCallback(async (file: File | null) => {
     setExtractionToken("");
+    setInvoiceBlobUrl("");
     if (!file) {
       setInvoiceFile(null);
       return;
@@ -522,14 +570,30 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     setInvoiceFile(prepared);
     setError(null);
 
+    // העלאה ישירה ל-Blob — הקובץ לא עובר דרך פונקציית שרת.
+    let blobUrl: string;
+    setUploadProgress(0);
+    try {
+      blobUrl = await uploadInvoiceFileToBlob(user.id, prepared, setUploadProgress);
+    } catch (err) {
+      setInvoiceFile(null);
+      setError(describeUploadError(err));
+      return;
+    } finally {
+      setUploadProgress(null);
+    }
+    setInvoiceBlobUrl(blobUrl);
+
     if (!initialDocumentConfig?.extractFromFile) return;
     setExtractingFile(true);
     try {
-      const fd = new FormData();
-      fd.append("file", prepared, prepared.name);
-      const res = await fetch("/api/invoices/extract", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) return;
+      const { ok, data } = await postJson<{
+        extractionToken?: string;
+        receiptNumber?: string | null;
+        description?: string | null;
+        amount?: number | null;
+      }>("/api/invoices/extract", { blobUrl });
+      if (!ok) return;
       if (data.extractionToken) setExtractionToken(data.extractionToken);
       setInvoiceForm((f) => ({
         ...f,
@@ -547,7 +611,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     } finally {
       setExtractingFile(false);
     }
-  }, [initialDocumentConfig?.extractFromFile]);
+  }, [initialDocumentConfig?.extractFromFile, user.id]);
 
   const openAccountingModal = useCallback((invoiceId: string) => {
     setError(null);
@@ -563,6 +627,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     setAccountingExtractedAmount(null);
     setAccountingExtractedNumber("");
     setAccountingExtractionToken("");
+    setAccountingBlobUrl("");
     if (!file) {
       setAccountingFile(null);
       return;
@@ -583,14 +648,28 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     setAccountingFile(prepared);
     setError(null);
 
+    let blobUrl: string;
+    setAccountingUploadProgress(0);
+    try {
+      blobUrl = await uploadInvoiceFileToBlob(user.id, prepared, setAccountingUploadProgress);
+    } catch (err) {
+      setAccountingFile(null);
+      setError(describeUploadError(err));
+      return;
+    } finally {
+      setAccountingUploadProgress(null);
+    }
+    setAccountingBlobUrl(blobUrl);
+
     if (!followUpAccountingDocument.extractFromFile) return;
     setExtractingAccountingFile(true);
     try {
-      const fd = new FormData();
-      fd.append("file", prepared, prepared.name);
-      const res = await fetch("/api/invoices/extract", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) return;
+      const { ok, data } = await postJson<{
+        extractionToken?: string;
+        receiptNumber?: string | null;
+        amount?: number | null;
+      }>("/api/invoices/extract", { blobUrl });
+      if (!ok) return;
       if (data.extractionToken) setAccountingExtractionToken(data.extractionToken);
       if (data.receiptNumber) {
         setAccountingExtractedNumber(data.receiptNumber);
@@ -606,7 +685,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     } finally {
       setExtractingAccountingFile(false);
     }
-  }, [accountingInvoiceNumber, followUpAccountingDocument.extractFromFile]);
+  }, [accountingInvoiceNumber, followUpAccountingDocument.extractFromFile, user.id]);
 
   const accountingNumberError = useMemo(() => {
     if (!accountingInvoice || !accountingFile) return null;
@@ -655,7 +734,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setError(monthError);
       return;
     }
-    if (!accountingInvoiceId || !accountingFile) {
+    if (!accountingInvoiceId || !accountingFile || !accountingBlobUrl) {
       setError(`חובה לצרף ${followUpAccountingDocument.fileLabel}`);
       return;
     }
@@ -670,38 +749,30 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     setSubmittingAccounting(true);
     setError(null);
     try {
-      const fd = new FormData();
-      fd.append("invoiceId", accountingInvoiceId);
-      fd.append("file", accountingFile, accountingFile.name);
-      if (accountingInvoiceNumber.trim()) {
-        fd.append("invoiceNumber", accountingInvoiceNumber.trim());
-      }
-      if (accountingExtractionToken) {
-        fd.append("extractionToken", accountingExtractionToken);
-      }
-      const res = await fetch("/api/invoices/accounting-document", { method: "POST", body: fd });
-      let data: { error?: string } = {};
-      try {
-        data = await res.json();
-      } catch {
-        setError(res.ok ? "שגיאה בפענוח תשובת השרת" : `שגיאת שרת (${res.status}) — נסה שוב`);
-        return;
-      }
-      if (!res.ok) {
+      const { ok, data } = await postJson<InvoiceSubmitResponse>("/api/invoices/accounting-document", {
+        invoiceId: accountingInvoiceId,
+        blobUrl: accountingBlobUrl,
+        invoiceNumber: accountingInvoiceNumber.trim(),
+        extractionToken: accountingExtractionToken || undefined,
+      });
+      if (!ok) {
         setError(data.error || "שגיאה בהעלאת מסמך חשבונאי");
         return;
       }
       setShowAccountingModal(false);
       setAccountingInvoiceId("");
       setAccountingFile(null);
+      setAccountingBlobUrl("");
       setAccountingInvoiceNumber("");
       setAccountingExtractedAmount(null);
       setAccountingExtractedNumber("");
-      setInvoiceSuccess(`הרשומה עודכנה — ${followUpAccountingDocument.fileLabel} הוגשה בהצלחה`);
+      setInvoiceSuccess(
+        submitOutcomeMessage(data, `הרשומה עודכנה — ${followUpAccountingDocument.fileLabel} הוגשה בהצלחה`)
+      );
       setTimeout(() => setInvoiceSuccess(null), 5000);
       void fetchData(); // רענון ברקע — לא מעכב את סגירת המודל
     } catch {
-      setError("שגיאת רשת.");
+      setError("שגיאת רשת — בדוק את החיבור ונסה שוב.");
     } finally {
       setSubmittingAccounting(false);
     }
@@ -754,7 +825,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setError("יש למלא סכום להגשה");
       return;
     }
-    if (!invoiceFile) {
+    if (!invoiceFile || !invoiceBlobUrl) {
       setError(`חובה לצרף ${initialDocumentConfig?.fileLabel ?? "מסמך"}`);
       return;
     }
@@ -770,33 +841,28 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     setSubmittingInvoice(true);
     setError(null);
     try {
-      const fd = new FormData();
-      fd.append("voluntarySubmission", "true");
-      fd.append("eventsDescription", eventsDescription.trim());
-      fd.append("orderIds", "[]");
-      fd.append("subitemIds", "[]");
-      fd.append("amount", String(amount));
-      fd.append("eventDate", `${selectedMonth}-01`);
-      fd.append("monthLabel", monthKeyToLabel(selectedMonth));
-      fd.append("monthKey", selectedMonth);
-      fd.append("beneficiaryName", invoiceForm.beneficiaryName);
-      fd.append("bankCode", invoiceForm.bankCode);
-      fd.append("bankBranch", invoiceForm.bankBranch);
-      fd.append("bankAccount", invoiceForm.bankAccount);
-      fd.append(
-        "bankDetails",
-        [invoiceForm.beneficiaryName, invoiceForm.bankCode, invoiceForm.bankBranch, invoiceForm.bankAccount]
+      const { ok, data } = await postJson<InvoiceSubmitResponse>("/api/invoices", {
+        voluntarySubmission: true,
+        eventsDescription: eventsDescription.trim(),
+        orderIds: [],
+        subitemIds: [],
+        amount,
+        eventDate: `${selectedMonth}-01`,
+        monthLabel: monthKeyToLabel(selectedMonth),
+        monthKey: selectedMonth,
+        beneficiaryName: invoiceForm.beneficiaryName,
+        bankCode: invoiceForm.bankCode,
+        bankBranch: invoiceForm.bankBranch,
+        bankAccount: invoiceForm.bankAccount,
+        bankDetails: [invoiceForm.beneficiaryName, invoiceForm.bankCode, invoiceForm.bankBranch, invoiceForm.bankAccount]
           .filter(Boolean)
-          .join(" / ")
-      );
-      fd.append("invoiceNumber", invoiceForm.invoiceNumber);
-      fd.append("description", invoiceForm.description);
-      fd.append("file", invoiceFile, invoiceFile.name);
-      if (extractionToken) fd.append("extractionToken", extractionToken);
-
-      const res = await fetch("/api/invoices", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) {
+          .join(" / "),
+        invoiceNumber: invoiceForm.invoiceNumber,
+        description: invoiceForm.description,
+        blobUrl: invoiceBlobUrl,
+        extractionToken: extractionToken || undefined,
+      });
+      if (!ok) {
         setError(data.error || "שגיאה בהגשת מסמך");
         return;
       }
@@ -806,10 +872,14 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setVoluntaryAmount("");
       setInvoiceForm({ beneficiaryName: "", bankCode: "", bankBranch: "", bankAccount: "", invoiceNumber: "", description: "" });
       setInvoiceFile(null);
+      setInvoiceBlobUrl("");
       setExtractionToken("");
       setExtractedActualAmount(null);
       setInvoiceSuccess(
-        `המסמך הוגש לבדיקה — ${amount.toLocaleString("he-IL")} ₪. נבדוק את הפרטים ונעדכן.`
+        submitOutcomeMessage(
+          data,
+          `המסמך הוגש לבדיקה — ${amount.toLocaleString("he-IL")} ₪. נבדוק את הפרטים ונעדכן.`
+        )
       );
       setArtistBankDetails({
         beneficiaryName: invoiceForm.beneficiaryName,
@@ -820,7 +890,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setTimeout(() => setInvoiceSuccess(null), 5000);
       void fetchData(); // רענון ברקע
     } catch {
-      setError("שגיאת רשת.");
+      setError("שגיאת רשת — בדוק את החיבור ונסה שוב.");
     } finally {
       setSubmittingInvoice(false);
     }
@@ -863,7 +933,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setError("יש לבחור לפחות אירוע אחד");
       return;
     }
-    if (!invoiceFile) {
+    if (!invoiceFile || !invoiceBlobUrl) {
       setError(`חובה לצרף ${initialDocumentConfig?.fileLabel ?? "מסמך"}`);
       return;
     }
@@ -885,31 +955,26 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
         ? reportedAmount
         : undefined;
 
-      const fd = new FormData();
-      fd.append("orderIds", JSON.stringify(orderIds));
-      fd.append("subitemIds", JSON.stringify(subitemIds));
-      fd.append("amount", String(amount));
-      if (actualAmountToSend != null) fd.append("actualAmount", String(actualAmountToSend));
-      fd.append("eventDate", eventDate);
-      fd.append("monthLabel", monthLabel);
-      fd.append("monthKey", monthKey);
-      fd.append("beneficiaryName", invoiceForm.beneficiaryName);
-      fd.append("bankCode", invoiceForm.bankCode);
-      fd.append("bankBranch", invoiceForm.bankBranch);
-      fd.append("bankAccount", invoiceForm.bankAccount);
-      fd.append(
-        "bankDetails",
-        [invoiceForm.beneficiaryName, invoiceForm.bankCode, invoiceForm.bankBranch, invoiceForm.bankAccount].filter(Boolean).join(" / ")
-      );
-      fd.append("invoiceNumber", invoiceForm.invoiceNumber);
-      fd.append("amountNote", customAmountNote);
-      fd.append("description", invoiceForm.description);
-      if (invoiceFile) fd.append("file", invoiceFile, invoiceFile.name);
-      if (extractionToken) fd.append("extractionToken", extractionToken);
-
-      const res = await fetch("/api/invoices", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) {
+      const { ok, data } = await postJson<InvoiceSubmitResponse>("/api/invoices", {
+        orderIds,
+        subitemIds,
+        amount,
+        actualAmount: actualAmountToSend,
+        eventDate,
+        monthLabel,
+        monthKey,
+        beneficiaryName: invoiceForm.beneficiaryName,
+        bankCode: invoiceForm.bankCode,
+        bankBranch: invoiceForm.bankBranch,
+        bankAccount: invoiceForm.bankAccount,
+        bankDetails: [invoiceForm.beneficiaryName, invoiceForm.bankCode, invoiceForm.bankBranch, invoiceForm.bankAccount].filter(Boolean).join(" / "),
+        invoiceNumber: invoiceForm.invoiceNumber,
+        amountNote: customAmountNote,
+        description: invoiceForm.description,
+        blobUrl: invoiceBlobUrl,
+        extractionToken: extractionToken || undefined,
+      });
+      if (!ok) {
         setError(data.error || "שגיאה בהגשת חשבונית");
         return;
       }
@@ -917,15 +982,19 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setShowMonthInvoiceModal(false);
       setInvoiceForm({ beneficiaryName: "", bankCode: "", bankBranch: "", bankAccount: "", invoiceNumber: "", description: "" });
       setInvoiceFile(null);
+      setInvoiceBlobUrl("");
       setExtractionToken("");
       setCustomAmountEnabled(false);
       setCustomAmountValue("");
       setCustomAmountNote("");
       setExtractedActualAmount(null);
       setInvoiceSuccess(
-        initialDocumentConfig?.kind === "payment_request"
-          ? `בקשת התשלום הוגשה בהצלחה — ${amount.toLocaleString("he-IL")} ₪`
-          : `${initialDocumentConfig?.fileLabel ?? "המסמך"} הוגש בהצלחה — ${amount.toLocaleString("he-IL")} ₪`
+        submitOutcomeMessage(
+          data,
+          initialDocumentConfig?.kind === "payment_request"
+            ? `בקשת התשלום הוגשה בהצלחה — ${amount.toLocaleString("he-IL")} ₪`
+            : `${initialDocumentConfig?.fileLabel ?? "המסמך"} הוגש בהצלחה — ${amount.toLocaleString("he-IL")} ₪`
+        )
       );
       setArtistBankDetails({
         beneficiaryName: invoiceForm.beneficiaryName,
@@ -936,7 +1005,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       setTimeout(() => setInvoiceSuccess(null), 5000);
       void fetchData(); // רענון ברקע
     } catch {
-      setError("שגיאת רשת.");
+      setError("שגיאת רשת — בדוק את החיבור ונסה שוב.");
     } finally {
       setSubmittingInvoice(false);
     }
@@ -1326,8 +1395,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 {invoicesInSelectedMonth.map((inv) => (
                   (() => {
                     const needsAccountingUpload = isAwaitingAccountingDocument(inv.submissionStatus);
+                    const fileMissing = inv.fileStatus === "קובץ חסר";
                     return (
-                  <tr key={inv.id} className={needsAccountingUpload ? "bg-amber-50/40" : undefined}>
+                  <tr key={inv.id} className={fileMissing ? "bg-red-50/40" : needsAccountingUpload ? "bg-amber-50/40" : undefined}>
                     <td className="px-4 py-3 font-medium text-gray-800">{inv.name}</td>
                     <td className="px-4 py-3 text-gray-500 tabular-nums">{formatDateDDMMYY(inv.date)}</td>
                     <td className="px-4 py-3">
@@ -1338,9 +1408,23 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                       }`}>
                         {getSubmissionStatusDisplay(inv.submissionStatus || inv.status)}
                       </span>
+                      {fileMissing && (
+                        <span className="mr-1 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-700 border border-red-200">
+                          קובץ חסר
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
-                      {needsAccountingUpload ? (
+                      {fileMissing ? (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-red-700 hover:text-red-800 underline underline-offset-2 disabled:opacity-50"
+                          disabled={retryingFileId === inv.id}
+                          onClick={() => handleRetryFile(inv.id)}
+                        >
+                          {retryingFileId === inv.id ? "מצרף..." : "צרף את הקובץ שוב"}
+                        </button>
+                      ) : needsAccountingUpload ? (
                         <button
                           type="button"
                           className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2"
@@ -1473,7 +1557,11 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   >
                     <div className="flex items-center justify-between gap-3">
                       <span className={`text-sm font-medium ${invoiceFile ? "text-emerald-800" : "text-blue-800"}`}>
-                        {invoiceFile ? "הקובץ צורף בהצלחה" : "לחץ/י כאן לבחירת קובץ"}
+                        {uploadProgress != null
+                          ? `מעלה קובץ… ${Math.round(uploadProgress)}%`
+                          : invoiceFile
+                            ? "הקובץ צורף בהצלחה"
+                            : "לחץ/י כאן לבחירת קובץ"}
                       </span>
                       <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${invoiceFile ? "bg-emerald-200 text-emerald-800" : "bg-blue-200 text-blue-800"}`}>
                         PDF / תמונה
@@ -1529,7 +1617,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   <button
                     type="button"
                     className="btn-primary"
-                    disabled={submittingInvoice}
+                    disabled={submittingInvoice || uploadProgress != null}
                     onClick={handleSubmitVoluntaryInvoice}
                   >
                     {submittingInvoice ? "שולח..." : `הגש ${voluntaryDocumentLabel} לבדיקה`}
@@ -1742,7 +1830,9 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <span className={`text-sm font-medium ${invoiceFile ? "text-emerald-800" : "text-blue-800"}`}>
-                            {invoiceFile
+                            {uploadProgress != null
+                              ? `מעלה קובץ… ${Math.round(uploadProgress)}%`
+                              : invoiceFile
                               ? "הקובץ הועלה בהצלחה"
                               : `לחץ/י כאן להעלאת ${initialDocumentConfig?.fileLabel ?? "מסמך"}`}
                           </span>
@@ -1838,7 +1928,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                       <button
                         type="submit"
                         className="btn-primary"
-                        disabled={submittingInvoice || Boolean(submitBlockReason)}
+                        disabled={submittingInvoice || uploadProgress != null || Boolean(submitBlockReason)}
                       >
                         {submittingInvoice
                           ? "שולח..."
@@ -1945,7 +2035,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={submittingAccounting || !accountingFile || !accountingInvoiceNumber.trim() || Boolean(accountingNumberError)}
+                  disabled={submittingAccounting || accountingUploadProgress != null || !accountingBlobUrl || !accountingFile || !accountingInvoiceNumber.trim() || Boolean(accountingNumberError)}
                   onClick={handleSubmitAccountingDocument}
                 >
                   {submittingAccounting ? "מעדכן..." : `עדכן רשומה — ${followUpAccountingDocument.fileLabel}`}

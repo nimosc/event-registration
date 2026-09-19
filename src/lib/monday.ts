@@ -1,4 +1,5 @@
 import { parseRoleLabel } from "./roles";
+import { parsePendingBlob } from "./invoicePendingBlob";
 import type { RegistrationRole, Role } from "./roles";
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
@@ -40,6 +41,16 @@ export const INVOICE_SUBMISSION_TYPE_COLUMN_ID = "color_mm5051wy";        // ס�
 export const INVOICE_MATCH_STATUS_COLUMN_ID = "color_mm50n91j"; // סטטוס התאמה: תקין / בקשת תשלום שונה / קבלה שונה מהבקשת תשלום
 /** שם האומן כטקסט פשוט — מאפשר Group by לפי אומן בתצוגות Monday (עמודת קישור אינה ניתנת לקיבוץ) */
 export const INVOICE_ARTIST_NAME_COLUMN_ID = "text_mm6tp6dh";
+/** SHA-256 של קובץ ההגשה — מפתח אידמפוטנטיות (אומן + חודש + hash) */
+export const INVOICE_FILE_HASH_COLUMN_ID = "text_mm7bb3jm";
+/** URL של blob שעדיין לא צורף ל-Monday (אחרי כשל צירוף) */
+export const INVOICE_PENDING_BLOB_COLUMN_ID = "text_mm7b4e73";
+/** סטטוס קובץ: מצורף / קובץ חסר */
+export const INVOICE_FILE_STATUS_COLUMN_ID = "color_mm7bg02t";
+export const INVOICE_FILE_STATUS = {
+  ATTACHED: "מצורף",
+  MISSING: "קובץ חסר",
+} as const;
 
 export interface MondayColumnValue {
   id: string;
@@ -1774,6 +1785,12 @@ export interface InvoiceItemDto {
   description: string;
   orderIds: string[];
   submissionStatus: string;
+  /** SHA-256 של קובץ ההגשה — לאידמפוטנטיות */
+  fileHash: string;
+  /** מצורף / קובץ חסר / "" (רשומות ישנות) */
+  fileStatus: string;
+  /** URL של blob שממתין לצירוף (רק כשהצירוף נכשל) */
+  pendingBlobUrl: string;
 }
 
 export async function createInvoiceItem(params: {
@@ -1798,6 +1815,8 @@ export async function createInvoiceItem(params: {
   paymentRequestNumber?: string; // בקשת תשלום document number (kept separate from invoiceNumber)
   submissionType?: string;       // בקשת תשלום חודשית / בקשה לבדיקה
   matchStatus?: string;          // סטטוס התאמה: תקין / בקשת תשלום שונה / קבלה שונה מהבקשת תשלום
+  fileHash?: string;             // SHA-256 של הקובץ — מפתח אידמפוטנטיות
+  fileStatus?: string;           // INVOICE_FILE_STATUS
 }): Promise<{ id: string }> {
   const itemName = `חשבונית - ${params.monthLabel} - ${params.artistName}`;
   const groupTitle = resolveInvoiceGroupTitle(params.monthKey, params.eventDate);
@@ -1838,6 +1857,8 @@ export async function createInvoiceItem(params: {
     colValues[INVOICE_SUBMISSION_STATUS_COLUMN_ID] = { label: params.submissionStatus };
   }
   colValues[INVOICE_ORDER_IDS_COLUMN_ID] = JSON.stringify(params.orderIds);
+  if (params.fileHash) colValues[INVOICE_FILE_HASH_COLUMN_ID] = params.fileHash;
+  if (params.fileStatus) colValues[INVOICE_FILE_STATUS_COLUMN_ID] = { label: params.fileStatus };
 
   // create_labels_if_missing: תוויות סטטוס (כמו "לבדיקה") עשויות שלא להתקיים
   // עדיין בעמודה — בלי הדגל Monday דוחה את היצירה כולה וההגשה קורסת.
@@ -1925,6 +1946,80 @@ export async function uploadFileToInvoiceItem(itemId: string, file: Blob, filena
   await uploadFileToInvoiceColumn(itemId, INVOICE_ACCOUNTING_FILE_COLUMN_ID, file, filename);
 }
 
+/**
+ * מצרף קובץ לעמודה/עמודות עם ניסיונות חוזרים (backoff 1s, 3s). זורק אחרי
+ * הניסיון האחרון — הקורא אחראי לסמן "קובץ חסר".
+ */
+export async function attachInvoiceFileWithRetry(
+  itemId: string,
+  columnIds: string[],
+  file: Blob,
+  filename: string,
+  attempts = 3
+): Promise<void> {
+  const delays = [1000, 3000];
+  for (const columnId of columnIds) {
+    let lastError: unknown = null;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await uploadFileToInvoiceColumn(itemId, columnId, file, filename);
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        console.error(`[invoice ${itemId}] attach to ${columnId} failed (attempt ${i + 1}/${attempts}):`, err);
+        if (i < attempts - 1) await new Promise((r) => setTimeout(r, delays[i] ?? 3000));
+      }
+    }
+    if (lastError) throw lastError;
+  }
+}
+
+/** מעדכן סטטוס קובץ ו-URL ממתין על רשומת חשבונית. */
+export async function setInvoiceFileState(
+  itemId: string,
+  state: { status: string; pendingBlobUrl: string }
+): Promise<void> {
+  const colValues: Record<string, unknown> = {
+    [INVOICE_FILE_STATUS_COLUMN_ID]: { label: state.status },
+    [INVOICE_PENDING_BLOB_COLUMN_ID]: state.pendingBlobUrl,
+  };
+  await mondayQuery(
+    `mutation ($boardId: ID!, $itemId: ID!, $colValues: JSON!) {
+      change_multiple_column_values(board_id: $boardId, item_id: $itemId, column_values: $colValues, create_labels_if_missing: true) { id }
+    }`,
+    { boardId: String(BOARDS.INVOICES), itemId, colValues: JSON.stringify(colValues) }
+  );
+}
+
+/** כל ה-URL-ים של blobs שממתינים לצירוף — ל-cron הניקוי (שלא ימחק אותם). */
+export async function getAllPendingInvoiceBlobUrls(): Promise<Set<string>> {
+  type PendingPage = { cursor: string | null; items: { column_values: { text: string }[] }[] };
+  const fields = `cursor items { column_values(ids: ["${INVOICE_PENDING_BLOB_COLUMN_ID}"]) { text } }`;
+  const urls = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    let pageData: PendingPage;
+    if (cursor) {
+      const data = await mondayQuery<{ next_items_page: PendingPage }>(
+        `query { next_items_page(limit: 500, cursor: "${cursor}") { ${fields} } }`
+      );
+      pageData = data.next_items_page;
+    } else {
+      const data = await mondayQuery<{ boards: { items_page: PendingPage }[] }>(
+        `query { boards(ids: [${BOARDS.INVOICES}]) { items_page(limit: 500) { ${fields} } } }`
+      );
+      pageData = data.boards[0]?.items_page ?? { cursor: null, items: [] };
+    }
+    for (const item of pageData.items) {
+      const url = parsePendingBlob(item.column_values?.[0]?.text)?.url;
+      if (url) urls.add(url);
+    }
+    cursor = pageData.cursor ?? null;
+  } while (cursor);
+  return urls;
+}
+
 export async function updateInvoiceAccountingDetails(
   invoiceItemId: string,
   params: { invoiceNumber?: string; extractedAmount?: number }
@@ -2010,6 +2105,9 @@ function mapMondayItemToInvoiceDto(item: MondayItem): InvoiceItemDto {
     amountNote: getColumnValue(item, INVOICE_AMOUNT_NOTE_COLUMN_ID)?.text || "",
     description: getColumnValue(item, INVOICE_DESCRIPTION_COLUMN_ID)?.text || "",
     submissionStatus: getColumnValue(item, INVOICE_SUBMISSION_STATUS_COLUMN_ID)?.text || "",
+    fileHash: getColumnValue(item, INVOICE_FILE_HASH_COLUMN_ID)?.text || "",
+    fileStatus: getColumnValue(item, INVOICE_FILE_STATUS_COLUMN_ID)?.text || "",
+    pendingBlobUrl: getColumnValue(item, INVOICE_PENDING_BLOB_COLUMN_ID)?.text || "",
     orderIds: (() => {
       const textCol = getColumnValue(item, INVOICE_ORDER_IDS_COLUMN_ID)?.text || "";
       try {
@@ -2043,6 +2141,9 @@ const INVOICE_ITEM_COLUMN_IDS = [
   INVOICE_ORDER_IDS_COLUMN_ID,
   INVOICE_ARTIST_RELATION_COLUMN_ID,
   INVOICE_ORDER_RELATION_COLUMN_ID,
+  INVOICE_FILE_HASH_COLUMN_ID,
+  INVOICE_FILE_STATUS_COLUMN_ID,
+  INVOICE_PENDING_BLOB_COLUMN_ID,
 ].map((id) => `"${id}"`).join(", ");
 
 export async function getInvoiceItemForArtist(

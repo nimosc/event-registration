@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sha256OfFile, verifyExtractionToken } from "@/lib/extractionToken";
+import { BlobAccessError, BlobNotFoundError, deleteInvoiceBlobQuietly, downloadInvoiceBlob } from "@/lib/blobUpload";
+import { serializePendingBlob } from "@/lib/invoicePendingBlob";
 import type { ExtractedInvoiceFields } from "@/lib/invoiceValidation";
 import {
   createInvoiceItem,
@@ -10,7 +12,9 @@ import {
   mapMondayAttendanceToInternal,
   mapMondayCandidacyToInternal,
   parseLinkedItemIds,
-  uploadFileToInvoiceColumn,
+  attachInvoiceFileWithRetry,
+  setInvoiceFileState,
+  INVOICE_FILE_STATUS,
   updateArtistBankDetails,
   getArtistBankDetailsFields,
   updateSubitemsInvoiceStatus,
@@ -92,26 +96,29 @@ async function handleInvoiceSubmit(req: NextRequest) {
 
   const artistId = parseInt(session.id, 10);
 
-  const formData = await req.formData();
-  const voluntarySubmission = formData.get("voluntarySubmission") === "true";
-  const eventsDescription = ((formData.get("eventsDescription") as string) || "").trim();
-  const orderIds: string[] = JSON.parse(formData.get("orderIds") as string ?? "[]");
-  const subitemIds: string[] = JSON.parse(formData.get("subitemIds") as string ?? "[]");
-  const amount = Number(formData.get("amount") ?? 0);
-  const actualAmount = formData.get("actualAmount") ? Number(formData.get("actualAmount")) : undefined;
-  const bankDetails = (formData.get("bankDetails") as string) || "";
-  const beneficiaryName = (formData.get("beneficiaryName") as string) || "";
-  const bankCode = (formData.get("bankCode") as string) || "";
-  const bankBranch = (formData.get("bankBranch") as string) || "";
-  const bankAccount = (formData.get("bankAccount") as string) || "";
-  const invoiceNumber = (formData.get("invoiceNumber") as string) || "";
-  const amountNote = (formData.get("amountNote") as string) || "";
-  const description = (formData.get("description") as string) || "";
-  const eventDate = (formData.get("eventDate") as string) || "";
-  const monthLabel = (formData.get("monthLabel") as string) || "";
-  const monthKey = (formData.get("monthKey") as string) || "";
-  const extractionToken = (formData.get("extractionToken") as string) || "";
-  const file = formData.get("file") as File | null;
+  // גוף JSON — הקובץ עצמו כבר ב-Vercel Blob (העלאה ישירה מהדפדפן), מגיע רק ה-URL.
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const str = (k: string) => (body[k] == null ? "" : String(body[k]));
+  const list = (k: string): string[] => (Array.isArray(body[k]) ? (body[k] as unknown[]).map(String) : []);
+  const voluntarySubmission = body.voluntarySubmission === true || body.voluntarySubmission === "true";
+  const eventsDescription = str("eventsDescription").trim();
+  const orderIds = list("orderIds");
+  const subitemIds = list("subitemIds");
+  const amount = Number(body.amount ?? 0);
+  const actualAmount = body.actualAmount != null && body.actualAmount !== "" ? Number(body.actualAmount) : undefined;
+  const bankDetails = str("bankDetails");
+  const beneficiaryName = str("beneficiaryName");
+  const bankCode = str("bankCode");
+  const bankBranch = str("bankBranch");
+  const bankAccount = str("bankAccount");
+  const invoiceNumber = str("invoiceNumber");
+  const amountNote = str("amountNote");
+  const description = str("description");
+  const eventDate = str("eventDate");
+  const monthLabel = str("monthLabel");
+  const monthKey = str("monthKey");
+  const extractionToken = str("extractionToken");
+  const blobUrl = str("blobUrl").trim();
 
   const resolvedMonthKey = monthKey.trim() || parseInvoiceMonthKey(eventDate);
   const monthSubmissionError = getInvoiceMonthSubmissionError(resolvedMonthKey);
@@ -119,8 +126,16 @@ async function handleInvoiceSubmit(req: NextRequest) {
     return NextResponse.json({ error: monthSubmissionError }, { status: 400 });
   }
 
-  if (!file || file.size === 0) {
+  if (!blobUrl) {
     return NextResponse.json({ error: "חובה לצרף בקשת תשלום" }, { status: 400 });
+  }
+  let file: File;
+  try {
+    file = await downloadInvoiceBlob(blobUrl, session.id);
+  } catch (err) {
+    if (err instanceof BlobAccessError) return NextResponse.json({ error: err.message }, { status: 403 });
+    if (err instanceof BlobNotFoundError) return NextResponse.json({ error: err.message }, { status: 400 });
+    throw err;
   }
   if (!beneficiaryName.trim() || !bankCode.trim() || !bankBranch.trim() || !bankAccount.trim()) {
     return NextResponse.json({ error: "חובה למלא פרטי חשבון בנק" }, { status: 400 });
@@ -135,6 +150,24 @@ async function handleInvoiceSubmit(req: NextRequest) {
   // A valid signed token (from /api/invoices/extract) lets us reuse the extraction
   // already performed on this exact file instead of running the AI again.
   const fileHash = await sha256OfFile(file);
+
+  // אידמפוטנטיות: אותו אומן + אותו חודש + אותו קובץ = אותה הגשה. לחיצה חוזרת
+  // אחרי תשובה שאבדה בדרך מחזירה את הרשומה הקיימת במקום ליצור כפילות.
+  const duplicate = (await existingInvoicesPromise).find(
+    (inv) => inv.fileHash && inv.fileHash === fileHash && parseInvoiceMonthKey(inv.date) === resolvedMonthKey
+  );
+  if (duplicate) {
+    // ההעלאה החוזרת מיותרת — הקובץ כבר מצורף (או ממתין) על הרשומה הקיימת.
+    after(() => deleteInvoiceBlobQuietly(blobUrl));
+    return NextResponse.json({
+      success: true,
+      invoiceId: duplicate.id,
+      duplicate: true,
+      fileAttached: duplicate.fileStatus !== INVOICE_FILE_STATUS.MISSING,
+      submissionStatus: duplicate.submissionStatus,
+    });
+  }
+
   const signedExtraction = extractionToken
     ? verifyExtractionToken(extractionToken, fileHash)
     : null;
@@ -327,6 +360,8 @@ async function handleInvoiceSubmit(req: NextRequest) {
     monthLabel,
     monthKey,
     submissionStatus: documentConfig.submissionStatus,
+    fileHash,
+    fileStatus: INVOICE_FILE_STATUS.ATTACHED,
   });
 
   const fileColumnId =
@@ -341,10 +376,19 @@ async function handleInvoiceSubmit(req: NextRequest) {
     bankDetails || beneficiaryName || bankCode || bankBranch || bankAccount
       ? getArtistBankDetailsFields(session.id)
       : null;
-  // מעלים את הקובץ ראשון (הרשומה לעולם לא צריכה להתקיים בלי הקובץ). ההעלאות
-  // רצות ברצף כדי שאותו File ייקרא נקי לכל בקשת multipart.
-  for (const columnId of targetFileColumns) {
-    await uploadFileToInvoiceColumn(result.id, columnId, file, file.name);
+  // צירוף הקובץ עם ניסיונות חוזרים. כשל סופי לא מאבד כלום: הרשומה מסומנת
+  // "קובץ חסר" וה-blob נשמר לניסיון חוזר (/api/invoices/retry-file).
+  let fileAttached = true;
+  try {
+    await attachInvoiceFileWithRetry(result.id, targetFileColumns, file, file.name);
+    after(() => deleteInvoiceBlobQuietly(blobUrl));
+  } catch (err) {
+    fileAttached = false;
+    console.error(`[invoice ${result.id}] file attach failed, marking pending:`, err);
+    await setInvoiceFileState(result.id, {
+      status: INVOICE_FILE_STATUS.MISSING,
+      pendingBlobUrl: serializePendingBlob({ url: blobUrl, columns: targetFileColumns }),
+    });
   }
   const current = bankCheckPromise ? await bankCheckPromise : null;
 
@@ -388,7 +432,9 @@ async function handleInvoiceSubmit(req: NextRequest) {
   });
 
   return NextResponse.json({
+    success: true,
     invoiceId: result.id,
+    fileAttached,
     submissionStatus: documentConfig.submissionStatus,
     documentKind: documentConfig.kind,
   });

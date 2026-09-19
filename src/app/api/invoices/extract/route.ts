@@ -2,16 +2,36 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { extractInvoiceData, isInvoiceExtractAvailable } from "@/lib/invoiceExtract";
 import { sha256OfFile, signExtractionToken } from "@/lib/extractionToken";
+import { BlobAccessError, BlobNotFoundError, downloadInvoiceBlob } from "@/lib/blobUpload";
 
+export const maxDuration = 60;
+
+/**
+ * חילוץ שדות (מספר, סכום, סוג מסמך) מקובץ שכבר הועלה ל-Vercel Blob.
+ * הקובץ לא מגיע בגוף הבקשה — רק ה-URL שלו — ולכן אין מגבלת 4.5MB.
+ */
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
 
-  const formData = await req.formData();
-  const file = formData.get("file") as File | null;
-
-  if (!file || file.size === 0) {
+  let blobUrl = "";
+  try {
+    blobUrl = String(((await req.json()) as { blobUrl?: string }).blobUrl ?? "").trim();
+  } catch {
+    // גוף לא תקין — מטופל למטה
+  }
+  if (!blobUrl) {
     return NextResponse.json({ error: "לא צורף קובץ" }, { status: 400 });
+  }
+
+  let file: File;
+  try {
+    file = await downloadInvoiceBlob(blobUrl, session.id);
+  } catch (err) {
+    if (err instanceof BlobAccessError) return NextResponse.json({ error: err.message }, { status: 403 });
+    if (err instanceof BlobNotFoundError) return NextResponse.json({ error: err.message }, { status: 400 });
+    console.error("Invoice extract: blob download failed:", err);
+    return NextResponse.json({ error: "לא הצלחנו לקרוא את הקובץ — נסה שוב" }, { status: 502 });
   }
 
   if (!isInvoiceExtractAvailable()) {
