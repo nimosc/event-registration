@@ -51,6 +51,13 @@ export const INVOICE_FILE_STATUS = {
   ATTACHED: "מצורף",
   MISSING: "קובץ חסר",
 } as const;
+/** סטטוס תשלום — ההחלטה של הצוות מה לעשות עם הרשומה */
+export const INVOICE_PAYMENT_STATUS_COLUMN_ID = "status8";
+export const INVOICE_PAYMENT_STATUS = {
+  REVIEW: "בבדיקה",
+  TRANSFER: "העבר לתשלום",
+  PAID: "שולם",
+} as const;
 
 export interface MondayColumnValue {
   id: string;
@@ -2042,6 +2049,30 @@ export async function updateInvoiceAccountingDetails(
       itemId: String(invoiceItemId),
       columnValues: JSON.stringify(columnValues),
     }
+  );
+}
+
+/** קובע סטטוס תשלום. נקרא רק ביצירת הרשומה — אחר כך הסטטוס בידי המנהלים. */
+export async function setInvoicePaymentStatus(invoiceItemId: string, label: string): Promise<void> {
+  await mondayQuery(
+    `mutation {
+      change_column_value(
+        board_id: ${BOARDS.INVOICES},
+        item_id: ${invoiceItemId},
+        column_id: "${INVOICE_PAYMENT_STATUS_COLUMN_ID}",
+        value: ${JSON.stringify(JSON.stringify({ label }))}
+      ) { id }
+    }`
+  );
+}
+
+/** כותב אפדייט (תגובה) על רשומת חשבונית ב-Monday */
+export async function createInvoiceUpdate(invoiceItemId: string, body: string): Promise<void> {
+  await mondayQuery(
+    `mutation ($itemId: ID!, $body: String!) {
+      create_update(item_id: $itemId, body: $body) { id }
+    }`,
+    { itemId: invoiceItemId, body }
   );
 }
 

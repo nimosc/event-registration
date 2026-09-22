@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { sha256OfFile, verifyExtractionToken } from "@/lib/extractionToken";
 import { BlobAccessError, BlobNotFoundError, deleteInvoiceBlobQuietly, downloadInvoiceBlob } from "@/lib/blobUpload";
 import { serializePendingBlob } from "@/lib/invoicePendingBlob";
+import { decideInvoiceReview, formatInvoiceReviewUpdate } from "@/lib/invoiceReview";
 import type { ExtractedInvoiceFields } from "@/lib/invoiceValidation";
 import {
   createInvoiceItem,
@@ -15,6 +16,9 @@ import {
   attachInvoiceFileWithRetry,
   setInvoiceFileState,
   INVOICE_FILE_STATUS,
+  setInvoicePaymentStatus,
+  createInvoiceUpdate,
+  INVOICE_PAYMENT_STATUS,
   updateArtistBankDetails,
   getArtistBankDetailsFields,
   updateSubitemsInvoiceStatus,
@@ -400,9 +404,32 @@ async function handleInvoiceSubmit(req: NextRequest) {
       current.bankAccount !== bankAccount
     : false;
 
+  // חריג / לא חריג: לא חריג → "העבר לתשלום" אוטומטית; חריג → נשאר "בבדיקה"
+  // והסיבות נכתבות כאפדייט על הרשומה. נקבע פעם אחת כאן; אחר כך בידי המנהלים.
+  const review = decideInvoiceReview({
+    submissionType: voluntarySubmission ? INVOICE_SUBMISSION_TYPE.REVIEW : INVOICE_SUBMISSION_TYPE.MONTHLY,
+    matchStatus: needsTypeReview ? INVOICE_MATCH_STATUS.NEEDS_REVIEW : "",
+    expectedAmount: resolvedAmount,
+    reportedAmount,
+    amountNote: normalizedAmountNote,
+    fileAttached,
+    bankDetailsChanged: shouldUpdateBankDetails,
+  });
+  try {
+    await setInvoicePaymentStatus(
+      result.id,
+      review.exceptional ? INVOICE_PAYMENT_STATUS.REVIEW : INVOICE_PAYMENT_STATUS.TRANSFER
+    );
+  } catch (err) {
+    // ברירת המחדל של העמודה היא "בבדיקה" — כשל כאן משאיר את הרשומה בבדיקה, לא מאבד אותה.
+    console.error(`[invoice ${result.id}] payment status write failed:`, err);
+  }
+
   // Non-critical writes run after the response is sent (kept alive by the platform).
   after(async () => {
-    const postCreateTasks: Array<Promise<unknown>> = [];
+    const postCreateTasks: Array<Promise<unknown>> = [
+      createInvoiceUpdate(result.id, formatInvoiceReviewUpdate(review)),
+    ];
     if (resolvedSubitemIds.length > 0) {
       postCreateTasks.push(linkSubitemsToInvoice(resolvedSubitemIds, result.id));
       if (documentConfig.subitemInvoiceStatus) {
