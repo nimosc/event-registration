@@ -427,9 +427,11 @@ async function handleInvoiceSubmit(req: NextRequest) {
 
   // Non-critical writes run after the response is sent (kept alive by the platform).
   after(async () => {
-    const postCreateTasks: Array<Promise<unknown>> = [
-      createInvoiceUpdate(result.id, formatInvoiceReviewUpdate(review)),
-    ];
+    // אפדייט רק כשהרשומה נשארת בבדיקה — כדי שהמנהל ידע מה לבדוק. אישור
+    // אוטומטי לא מייצר רעש בפיד.
+    const postCreateTasks: Array<Promise<unknown>> = review.exceptional
+      ? [createInvoiceUpdate(result.id, formatInvoiceReviewUpdate(review))]
+      : [];
     if (resolvedSubitemIds.length > 0) {
       postCreateTasks.push(linkSubitemsToInvoice(resolvedSubitemIds, result.id));
       if (documentConfig.subitemInvoiceStatus) {
