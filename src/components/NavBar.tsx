@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import posthog from "posthog-js";
-import { getRegistrationRole, isAdmin, type Role } from "@/lib/roles";
+import { canRegisterForEvents, isAdmin, type Role } from "@/lib/roles";
 
 interface NavBarProps {
   userName: string;
@@ -94,7 +94,7 @@ export default function NavBar({ userName, userRole, userLocation, adminMode = "
   }
 
   // מנהל אומן מקבל את שתי הקבוצות — ניהול וגם אומן
-  const registers = getRegistrationRole(userRole) !== null;
+  const registers = canRegisterForEvents(userRole);
   const adminLinks = [
     { href: "/admin", label: "אישור מועמדות", adminMode: "candidacy" as const },
     { href: "/admin?mode=arrival", label: "אישור הגעה", adminMode: "arrival" as const },

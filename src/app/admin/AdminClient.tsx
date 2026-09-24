@@ -307,7 +307,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-type AssignableArtist = { id: string; name: string; phone: string };
+type AssignableArtist = { id: string; name: string; phone: string; registrationRoles: Array<"אומן" | "ODT"> };
 
 function normalizePhone(phone: string): string {
   let p = (phone || "").replace(/[\s\-\(\)\.]/g, "");
@@ -326,6 +326,8 @@ function AssignArtistControls({
   const [modalOpen, setModalOpen] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [selectedArtistId, setSelectedArtistId] = useState<string>("");
+  const [assignRole, setAssignRole] = useState<"אומן" | "ODT" | "">("");
+  const [orderNeeds, setOrderNeeds] = useState<{ artist: boolean; odt: boolean }>({ artist: true, odt: false });
   const [assigning, setAssigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -348,8 +350,14 @@ function AssignArtistControls({
           return;
         }
         const raw: AssignableArtist[] = Array.isArray(data.artists)
-          ? data.artists.map((a: any) => ({ id: String(a.id), name: String(a.name), phone: String(a.phone || "") }))
+          ? data.artists.map((a: any) => ({
+              id: String(a.id),
+              name: String(a.name),
+              phone: String(a.phone || ""),
+              registrationRoles: Array.isArray(a.registrationRoles) ? a.registrationRoles : ["אומן"],
+            }))
           : [];
+        if (data.orderNeeds) setOrderNeeds({ artist: !!data.orderNeeds.artist, odt: !!data.orderNeeds.odt });
 
         // Deduplicate by normalized phone
         const seen = new Set<string>();
@@ -395,7 +403,7 @@ function AssignArtistControls({
       const res = await fetch("/api/admin/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, artistId: selectedArtistId }),
+        body: JSON.stringify({ orderId, artistId: selectedArtistId, role: assignRole || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -539,6 +547,37 @@ function AssignArtistControls({
               )}
             </div>
 
+            {/* בחירת תפקיד — רק כשהאומן הוא אומן+ODT וההזמנה צריכה את שניהם */}
+            {(() => {
+              const selected = artists.find((a) => a.id === selectedArtistId);
+              const needsChoice =
+                !!selected && selected.registrationRoles.length > 1 && orderNeeds.artist && orderNeeds.odt;
+              if (!needsChoice) return null;
+              return (
+                <div className="px-6 pb-3 flex-shrink-0">
+                  <p className="text-xs text-gray-500 mb-1.5">לשבץ כ:</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["אומן", "ODT"] as const).map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setAssignRole(r)}
+                        className={`py-2 rounded-xl text-sm font-medium border transition-colors ${
+                          assignRole === r
+                            ? r === "ODT"
+                              ? "bg-violet-50 border-violet-300 text-violet-800"
+                              : "bg-blue-50 border-blue-300 text-blue-800"
+                            : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        {r === "ODT" ? "ODT" : "אומן"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Footer */}
             <div className="flex gap-2 justify-end px-6 py-4 border-t border-gray-100 flex-shrink-0">
               <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">
@@ -547,7 +586,13 @@ function AssignArtistControls({
               <button
                 type="button"
                 onClick={handleAssign}
-                disabled={!selectedArtistId || assigning || optionsLoading || filteredArtists.length === 0}
+                disabled={
+                  !selectedArtistId || assigning || optionsLoading || filteredArtists.length === 0 ||
+                  (() => {
+                    const s = artists.find((a) => a.id === selectedArtistId);
+                    return !!s && s.registrationRoles.length > 1 && orderNeeds.artist && orderNeeds.odt && !assignRole;
+                  })()
+                }
                 className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {assigning ? (

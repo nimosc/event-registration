@@ -23,7 +23,8 @@ import {
   getSubitemRegistrationRoleFromMondayColumns,
   registrationRoleToArtistType,
 } from "@/lib/monday";
-import { getSession, createSession, setSessionCookie, getRegistrationRole } from "@/lib/auth";
+import { getSession, createSession, setSessionCookie, getRegistrationRoles } from "@/lib/auth";
+import type { RegistrationRole } from "@/lib/roles";
 
 export interface OrderData {
   id: string;
@@ -51,10 +52,25 @@ export interface OrderData {
   isRoleOpen: boolean;
   isRoleFull: boolean;
   canRegister: boolean;
+  /** התפקידים שבהם המשתמש יכול להירשם להזמנה הזו (חיתוך תפקידיו עם צורכי ההזמנה) */
+  roleOptions: RoleOption[];
+  /** באיזה תפקיד המשתמש רשום (אם רשום) */
+  registeredAs?: RegistrationRole;
   isRegistered: boolean;
   subitemId?: string;
   candidacyStatus?: string;
   subitems: SubitemData[];
+}
+
+export interface RoleOption {
+  role: RegistrationRole;
+  label: "ODT" | "אומנים";
+  required: number;
+  applied: number;
+  approved: number;
+  isFull: boolean;
+  isOpen: boolean;
+  spotsRemaining: number;
 }
 
 export interface SubitemData {
@@ -88,7 +104,7 @@ export async function GET() {
       roleRefreshed = true;
     }
 
-    const sessionRegistrationRole = getRegistrationRole(session.role);
+    const userRoles = getRegistrationRoles(session.role);
     console.log(`[/api/orders] session ok (${session.name}, role: ${session.role})`);
     console.log(`[/api/orders] got ${items.length} items from Monday in ${Date.now() - start}ms`);
     const artistId = parseInt(session.id, 10);
@@ -148,15 +164,36 @@ export async function GET() {
 
         const orderLocation =
           orderLocationCol?.text?.trim() || parseDropdownLabel(orderLocationCol?.value)?.trim() || "";
-        const isOdt = sessionRegistrationRole === "ODT";
-        const registrationRole = isOdt ? "ODT" : "אומן";
+        // אפשרויות ההרשמה של המשתמש הזה בהזמנה הזו — אומן+ODT יכול לקבל שתיים.
+        const roleOptions: RoleOption[] = userRoles
+          .filter((r) => (r === "ODT" ? odtRequired > 0 : requiredCount > 0))
+          .map((r) => {
+            const isO = r === "ODT";
+            const st = isO ? capacity.odt : capacity.artist;
+            return {
+              role: r,
+              label: isO ? "ODT" : "אומנים",
+              required: st.required,
+              applied: isO ? registered.odt : registered.artist,
+              approved: st.approved,
+              isFull: st.isFull,
+              isOpen: isRegistrationOpenForRole(r, capacity),
+              spotsRemaining: st.required > 0 ? Math.max(0, st.required - st.approved) : 999,
+            };
+          });
+        // השדות היחידניים הישנים ממולאים מהאפשרות הראשונה (תאימות למסכים קיימים).
+        const primary = roleOptions[0];
+        const isOdt = primary?.role === "ODT";
+        const registrationRole: RegistrationRole = isOdt ? "ODT" : "אומן";
         const roleState = isOdt ? capacity.odt : capacity.artist;
         const roleCapacityCeiling = roleState.required;
         const roleApproved = roleState.approved;
         const roleApplied = isOdt ? registered.odt : registered.artist;
         const canRegister =
-          isRegistrationOpenForRole(registrationRole, capacity) &&
-          isOrderOpenForRegistration(status);
+          roleOptions.some((o) => o.isOpen) && isOrderOpenForRegistration(status);
+        const registeredAs: RegistrationRole | undefined = mySubitem
+          ? mySubitem.artistType === "ODT" ? "ODT" : "אומן"
+          : undefined;
 
         return {
           id: item.id,
@@ -179,6 +216,8 @@ export async function GET() {
           isRoleOpen: isRegistrationOpenForRole(registrationRole, capacity),
           isRoleFull: roleState.isFull,
           canRegister,
+          roleOptions,
+          registeredAs,
           spotsRemaining:
             roleCapacityCeiling > 0
               ? Math.max(0, roleCapacityCeiling - roleApproved)
@@ -196,10 +235,8 @@ export async function GET() {
         order.status === STATUS_CANCELLED
       )
       .filter((order) => {
-        if (sessionRegistrationRole === "ODT") return order.odtRequired > 0;
-        if (sessionRegistrationRole === "אומן") return order.requiredCount > 0;
-        // מנהל ללא תפקיד הרשמה — אין אירועים שהוא יכול להירשם אליהם
-        return false;
+        // מוצגות רק הזמנות שצריכות לפחות אחד מתפקידי המשתמש; מנהל טהור — כלום
+        return order.roleOptions.length > 0;
       });
 
     console.log(`[/api/orders] returning ${orders.length} orders (total ${Date.now() - start}ms)`);

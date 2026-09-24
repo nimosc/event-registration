@@ -61,10 +61,12 @@ Dropdown column values from Monday are returned as double-stringified JSON in th
 
 - Login validates credentials against the Artists board
 - On success, a **JWT** (HS256, 7-day expiry) is set as an HttpOnly cookie named `session`
-- `SessionUser` shape: `{ id, name, role, status, location? }` where `role` is `"אומן"` (artist), `"מנהל"` (admin), or `"ODT"`
-- `/api/orders` refreshes the artist's role from Monday on every call and re-issues the JWT if it changed
-- Middleware protects `/orders`, `/my-registrations`, `/admin` — redirecting to `/` if unauthenticated
-- `/admin` requires `role === "מנהל"`; other roles are redirected to `/orders`
+- `SessionUser` shape: `{ id, name, role, status, location? }` where `role` is one of `"אומן"`, `"ODT"`, `"אומן+ODT"`, `"מנהל"`, `"מנהל אומן"` (see `src/lib/roles.ts`)
+- Two independent questions are derived from the role, never compare the string directly: `isAdmin(role)` (admin screens + `/api/admin/*`) and `getRegistrationRoles(role)` (which registration roles the user may pick: `"מנהל אומן"` → `["אומן"]`, `"אומן+ODT"` → both, `"מנהל"` → none)
+- The proxy refreshes status and role from Monday on every protected request and re-issues the JWT; a failed/empty Monday read keeps the JWT's role (never demotes)
+- Middleware (`src/proxy.ts`) protects `/orders`, `/my-registrations`, `/admin` — redirecting to `/` if unauthenticated
+- `/admin` requires `isAdmin(role)`; `/orders`, `/my-registrations`, `/invoices` require `canRegisterForEvents(role)`
+- Registration role per order: `resolveRegistrationRole()` — explicit `role` in the request when the user has both and the order needs both, otherwise derived. Admin manual assign uses the same resolver.
 - **Magic link:** `GET /api/magic-link?id=<artistMondayItemId>` creates a session without credentials (for external flows)
 
 ### Page/Component Pattern

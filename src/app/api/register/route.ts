@@ -9,8 +9,10 @@ import {
   STATUS_CANCELLED,
   STATUS_ASSIGNMENT_DONE,
   STATUS_CANDIDACY_CLOSED,
+  ODT_REQUIRED_COLUMN_ID,
 } from "@/lib/monday";
-import { getSession, getRegistrationRole } from "@/lib/auth";
+import { getSession, getRegistrationRoles, resolveRegistrationRole } from "@/lib/auth";
+import type { RegistrationRole } from "@/lib/roles";
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { orderId } = body as { orderId: string };
+    const { orderId, role: requestedRole } = body as { orderId: string; role?: string };
 
     if (!orderId) {
       return NextResponse.json(
@@ -72,14 +74,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const registrationRole = getRegistrationRole(session.role);
-    if (registrationRole === null) {
+    const userRoles = getRegistrationRoles(session.role);
+    if (userRoles.length === 0) {
       return NextResponse.json(
         { error: "תפקידך אינו מאפשר הגשת מועמדות" },
         { status: 403 }
       );
     }
-    const isOdt = registrationRole === "ODT";
+    // באיזה תפקיד נרשמים: מהבקשה (אומן+ODT בוחר), או נגזר כשיש רק אפשרות אחת.
+    const requiredArtists = parseFloat(getColumnValue(order, "numeric_mm185aw7")?.text || "0") || 0;
+    const requiredOdt = parseFloat(getColumnValue(order, ODT_REQUIRED_COLUMN_ID)?.text || "0") || 0;
+    const resolved = resolveRegistrationRole({
+      userRoles,
+      orderNeeds: { artist: requiredArtists > 0, odt: requiredOdt > 0 },
+      requested: requestedRole === "ODT" || requestedRole === "אומן" ? (requestedRole as RegistrationRole) : null,
+    });
+    if ("error" in resolved) {
+      return NextResponse.json({ error: resolved.error }, { status: 400 });
+    }
+    const isOdt = resolved.role === "ODT";
 
     // Check if already submitted candidacy
     const artistId = parseInt(session.id, 10);
@@ -110,6 +123,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       subitemId: subitem.id,
+      role: resolved.role,
     });
   } catch (error) {
     console.error("Register error:", error);

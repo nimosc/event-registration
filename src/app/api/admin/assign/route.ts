@@ -8,9 +8,12 @@ import {
   parseLinkedItemIds,
   getOrderAdminSnapshotById,
   getArtistByIdBasic,
+  getLiveArtistRole,
   updateCandidacyConfirmation,
   STATUS_CANCELLED,
+  ODT_REQUIRED_COLUMN_ID,
 } from "@/lib/monday";
+import { getRegistrationRoles, parseRoleLabel, resolveRegistrationRole, type RegistrationRole } from "@/lib/roles";
 import { postJsonWebhookOrLog } from "@/lib/webhook";
 
 export async function POST(request: NextRequest) {
@@ -22,8 +25,9 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       orderId: string;
       artistId: string;
+      role?: string;
     };
-    const { orderId, artistId } = body;
+    const { orderId, artistId, role: requestedRole } = body;
     if (!orderId || !artistId) {
       return NextResponse.json({ error: "orderId/artistId חסרים" }, { status: 400 });
     }
@@ -56,7 +60,27 @@ export async function POST(request: NextRequest) {
     });
     if (alreadyRegistered) return NextResponse.json({ error: "האומן כבר משויך להזמנה" }, { status: 400 });
 
-    const subitem = await createSubitem(orderId, artistBasic.name, artistBasic.id);
+    // באיזה תפקיד משבצים: לפי תפקיד האומן וצורכי ההזמנה; אומן+ODT בהזמנה
+    // מעורבת חייב בחירה מפורשת מהמנהל.
+    const artistRole = await getLiveArtistRole(artistId);
+    const userRoles = getRegistrationRoles(artistRole ?? parseRoleLabel(null) ?? "אומן");
+    const orderNeeds = {
+      artist: (parseFloat(getColumnValue(order, "numeric_mm185aw7")?.text || "0") || 0) > 0,
+      odt: (parseFloat(getColumnValue(order, ODT_REQUIRED_COLUMN_ID)?.text || "0") || 0) > 0,
+    };
+    const resolved = resolveRegistrationRole({
+      userRoles,
+      orderNeeds,
+      requested: requestedRole === "ODT" || requestedRole === "אומן" ? (requestedRole as RegistrationRole) : null,
+    });
+    if ("error" in resolved) return NextResponse.json({ error: resolved.error }, { status: 400 });
+
+    const subitem = await createSubitem(
+      orderId,
+      artistBasic.name,
+      artistBasic.id,
+      resolved.role === "ODT" ? "ODT" : undefined
+    );
     // Mark candidacy as approved since this is an admin assignment.
     await updateCandidacyConfirmation(subitem.id, "מאושר");
 

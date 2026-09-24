@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import type { Role } from "./roles";
 
-export { parseRoleLabel, isAdmin, getRegistrationRole } from "./roles";
+export { parseRoleLabel, isAdmin, getRegistrationRoles, canRegisterForEvents, resolveRegistrationRole } from "./roles";
 export type { Role, RegistrationRole } from "./roles";
 
 const COOKIE_NAME = "session";

@@ -6,7 +6,7 @@ import {
   SESSION_COOKIE_OPTIONS,
   SessionUser,
 } from "@/lib/auth";
-import { getRegistrationRole, isAdmin, parseRoleLabel, type Role } from "@/lib/roles";
+import { canRegisterForEvents, isAdmin, parseRoleLabel, type Role } from "@/lib/roles";
 const PROTECTED_ROUTES = ["/orders", "/my-registrations", "/admin"];
 const ADMIN_ROUTES = ["/admin"];
 const MONDAY_API_URL = "https://api.monday.com/v2";
@@ -126,10 +126,7 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/orders", request.url));
     }
 
-    if (
-      pathname.startsWith("/orders") &&
-      getRegistrationRole(effectiveRole) === null
-    ) {
+    if (pathname.startsWith("/orders") && !canRegisterForEvents(effectiveRole)) {
       return NextResponse.redirect(new URL("/admin", request.url));
     }
 

@@ -7,9 +7,11 @@ import {
   getColumnValue,
   parseLinkedItemIds,
   ARTIST_ACTIVE_STATUS_COLUMN_ID,
+  ODT_REQUIRED_COLUMN_ID,
   mondayQuery,
   BOARDS,
 } from "@/lib/monday";
+import { getRegistrationRoles, parseRoleLabel } from "@/lib/roles";
 
 type MondayColumnDef = { id: string; title: string; type: string };
 
@@ -88,13 +90,22 @@ export async function GET(request: Request) {
           ? a.column_values.find((cv) => cv.id === phoneColumnId)
           : undefined;
         const phone = extractPhone(phoneCol?.text, phoneCol?.value);
-        return { id: a.id, name: a.name, statusText, phone };
+        const roleLabel = getColumnValue(a, "color_mm18btbr")?.text;
+        const registrationRoles = getRegistrationRoles(parseRoleLabel(roleLabel) ?? "אומן");
+        return { id: a.id, name: a.name, statusText, phone, registrationRoles };
       })
       .filter((a) => a.statusText && a.statusText !== "לא פעיל")
       .filter((a) => !registeredArtistIds.has(parseInt(a.id, 10)));
 
     eligible.sort((a, b) => a.name.localeCompare(b.name, "he"));
-    return NextResponse.json({ artists: eligible.map((a) => ({ id: a.id, name: a.name, phone: a.phone })) });
+    const orderNeeds = {
+      artist: (parseFloat(getColumnValue(order, "numeric_mm185aw7")?.text || "0") || 0) > 0,
+      odt: (parseFloat(getColumnValue(order, ODT_REQUIRED_COLUMN_ID)?.text || "0") || 0) > 0,
+    };
+    return NextResponse.json({
+      orderNeeds,
+      artists: eligible.map((a) => ({ id: a.id, name: a.name, phone: a.phone, registrationRoles: a.registrationRoles })),
+    });
   } catch (error) {
     console.error("Get assignable artists error:", error);
     return NextResponse.json({ error: "שגיאה בטעינת האומנים" }, { status: 500 });

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import OrderCard, { Order } from "@/components/OrderCard";
 import { SessionUser } from "@/lib/auth";
-import { getRegistrationRole } from "@/lib/roles";
+import type { RegistrationRole } from "@/lib/roles";
 
 interface OrdersClientProps {
   user: SessionUser;
@@ -272,21 +272,23 @@ export default function OrdersClient({ user }: OrdersClientProps) {
     }
   }
 
-  async function handleRegister(orderId: string) {
+  async function handleRegister(orderId: string, role?: RegistrationRole) {
     const res = await fetch("/api/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderId }),
+      body: JSON.stringify({ orderId, role }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "שגיאה בהגשת המועמדות");
     setOrders(prev => prev.map(o => {
       if (o.id !== orderId) return o;
-      const isOdt = getRegistrationRole(user.role) === "ODT";
+      const registeredAs: RegistrationRole = data.role === "ODT" ? "ODT" : "אומן";
+      const isOdt = registeredAs === "ODT";
       const newRoleApplied = o.roleApplied + 1;
       return {
         ...o,
         isRegistered: true,
+        registeredAs,
         subitemId: data.subitemId,
         assignedCount: isOdt ? o.assignedCount : o.assignedCount + 1,
         odtAssigned: isOdt ? o.odtAssigned + 1 : o.odtAssigned,

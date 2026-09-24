@@ -1,6 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import type { RegistrationRole } from "@/lib/roles";
+
+/** אפשרות הרשמה אחת של המשתמש בהזמנה (אומן או ODT) */
+export interface RoleOption {
+  role: RegistrationRole;
+  label: "ODT" | "אומנים";
+  required: number;
+  applied: number;
+  approved: number;
+  isFull: boolean;
+  isOpen: boolean;
+  spotsRemaining: number;
+}
 
 export interface Order {
   id: string;
@@ -24,6 +37,8 @@ export interface Order {
   isRoleOpen: boolean;
   isRoleFull: boolean;
   canRegister: boolean;
+  roleOptions: RoleOption[];
+  registeredAs?: RegistrationRole;
   isRegistered: boolean;
   subitemId?: string;
   candidacyStatus?: string;
@@ -82,7 +97,7 @@ function Spinner() {
 interface OrderCardProps {
   order: Order;
   userRole: string;
-  onRegister: (orderId: string) => Promise<void>;
+  onRegister: (orderId: string, role?: RegistrationRole) => Promise<void>;
   onUnregister: (orderId: string, subitemId: string) => Promise<void>;
 }
 
@@ -99,14 +114,14 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
   const titleParts = [order.location, formattedDateForTitle].filter(Boolean);
   const orderTitle = titleParts.length > 0 ? titleParts.join(" | ") : order.name;
 
-  async function handleClick() {
+  async function handleClick(role?: RegistrationRole) {
     setLoading(true);
     setError(null);
     try {
       if (order.isRegistered && order.subitemId) {
         await onUnregister(order.id, order.subitemId);
       } else {
-        await onRegister(order.id);
+        await onRegister(order.id, role);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "שגיאה לא צפויה");
@@ -192,11 +207,10 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
           )}
         </div>
 
-        {/* Spots bar */}
-        <RequiredInfo
-          roleLabel={order.roleLabel}
-          required={order.roleCapacityCeiling}
-        />
+        {/* שורת דרישה לכל תפקיד שהמשתמש יכול להירשם בו */}
+        {(order.roleOptions?.length ? order.roleOptions : [{ label: order.roleLabel, required: order.roleCapacityCeiling }]).map((opt) => (
+          <RequiredInfo key={opt.label} roleLabel={opt.label} required={opt.required} />
+        ))}
 
         {/* Error */}
         {error && (
@@ -224,8 +238,14 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
               נסגרה קבלת מועמדויות
             </div>
           ) : order.isRegistered ? (
+            <>
+            {order.registeredAs && (order.roleOptions?.length ?? 0) > 1 && (
+              <div className="mb-2 text-xs text-gray-600 text-center">
+                נרשמת כ<span className={order.registeredAs === "ODT" ? "text-violet-700 font-semibold" : "text-blue-700 font-semibold"}>{order.registeredAs === "ODT" ? "-ODT" : "אומן"}</span>
+              </div>
+            )}
             <button
-              onClick={handleClick}
+              onClick={() => handleClick()}
               disabled={loading}
               className="w-full py-2.5 px-4 rounded-xl text-sm font-medium border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 active:bg-red-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
@@ -236,13 +256,38 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
                 בטל מועמדות
               </>}
             </button>
+            </>
           ) : !order.canRegister ? (
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 text-center">
               לא ניתן להירשם
             </div>
+          ) : (order.roleOptions?.length ?? 0) > 1 ? (
+            // אומן+ODT בהזמנה שצריכה את שניהם — בוחר באיזה תפקיד להגיש
+            <div className="grid grid-cols-2 gap-2">
+              {order.roleOptions.map((opt) => (
+                <button
+                  key={opt.role}
+                  onClick={() => handleClick(opt.role)}
+                  disabled={loading || !opt.isOpen}
+                  title={!opt.isOpen ? "אין מקומות פתוחים לתפקיד זה" : undefined}
+                  className={`py-2.5 px-3 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-sm ${
+                    opt.role === "ODT"
+                      ? "bg-violet-500 hover:bg-violet-600 active:bg-violet-700 shadow-violet-200"
+                      : "bg-blue-500 hover:bg-blue-600 active:bg-blue-700 shadow-blue-200"
+                  }`}
+                >
+                  {loading ? <Spinner /> : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  )}
+                  {opt.role === "ODT" ? "הגש כ-ODT" : "הגש כאומן"}
+                </button>
+              ))}
+            </div>
           ) : (
             <button
-              onClick={handleClick}
+              onClick={() => handleClick()}
               disabled={loading}
               className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-blue-200"
             >
