@@ -19,9 +19,10 @@ export interface InvoiceReviewInput {
   reportedAmount: number;
   amountNote: string;
   fileAttached: boolean;
-  /** פרטי הבנק בהגשה שונים ממה ששמור על האומן (או שלא היו שמורים) */
-  bankDetailsChanged: boolean;
 }
+
+// שינוי פרטי בנק אינו חריג בכוונה: הפרטים החדשים נשמרים על האומן אוטומטית
+// (updateArtistBankDetails) והתשלום יוצא אליהם. הוחלט 2026-09-28.
 
 export interface InvoiceReviewDecision {
   exceptional: boolean;
@@ -57,17 +58,13 @@ export function decideInvoiceReview(input: InvoiceReviewInput): InvoiceReviewDec
     reasons.push("הקובץ לא צורף לרשומה ב-Monday — אין מסמך לבדוק");
   }
 
-  if (input.bankDetailsChanged) {
-    reasons.push("פרטי הבנק בהגשה שונים מהפרטים השמורים על האומן (או שלא היו שמורים) — יש לאמת לפני העברה");
-  }
-
   return { exceptional: reasons.length > 0, reasons };
 }
 
 /** טקסט האפדייט שנכתב על הרשומה ב-Monday */
 export function formatInvoiceReviewUpdate(decision: InvoiceReviewDecision): string {
   if (!decision.exceptional) {
-    return "✅ אושר אוטומטית לתשלום — כל הבדיקות עברו (סוג הגשה חודשי, סכום תואם למחושב, סוג מסמך אומת, קובץ מצורף, פרטי בנק ללא שינוי).";
+    return "✅ אושר אוטומטית לתשלום — כל הבדיקות עברו (סוג הגשה חודשי, סכום תואם למחושב, סוג מסמך אומת, קובץ מצורף).";
   }
   return [
     "⚠️ נשאר בבדיקה — נדרשת בדיקת מנהל לפני העברה לתשלום:",

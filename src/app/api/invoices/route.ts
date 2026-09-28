@@ -413,7 +413,6 @@ async function handleInvoiceSubmit(req: NextRequest) {
     reportedAmount,
     amountNote: normalizedAmountNote,
     fileAttached,
-    bankDetailsChanged: shouldUpdateBankDetails,
   });
   try {
     await setInvoicePaymentStatus(

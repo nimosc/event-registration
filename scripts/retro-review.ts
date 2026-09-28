@@ -21,9 +21,9 @@ async function main() {
   const { decideInvoiceReview, formatInvoiceReviewUpdate } = await import("../src/lib/invoiceReview");
   const { INVOICE_SUBMISSION_TYPE, INVOICE_MATCH_STATUS } = await import("../src/lib/invoiceDocuments");
 
-  type Item = { id: string; name: string; group: { title: string }; assets: { id: string }[]; column_values: { id: string; text: string; value: string | null; linked_item_ids?: string[] }[] };
+  type Item = { id: string; name: string; group: { title: string }; assets: { id: string }[]; updates: { text_body: string }[]; column_values: { id: string; text: string; value: string | null; linked_item_ids?: string[] }[] };
   const ids = ["status8", m.INVOICE_SUBMISSION_TYPE_COLUMN_ID, m.INVOICE_MATCH_STATUS_COLUMN_ID, m.INVOICE_AMOUNT_EXPECTED_COLUMN_ID, m.INVOICE_AMOUNT_REPORTED_COLUMN_ID, m.INVOICE_AMOUNT_NOTE_COLUMN_ID, m.INVOICE_FILE_STATUS_COLUMN_ID, m.INVOICE_ARTIST_RELATION_COLUMN_ID, m.INVOICE_BANK_BENEFICIARY_COLUMN_ID, m.INVOICE_BANK_CODE_COLUMN_ID, m.INVOICE_BANK_BRANCH_COLUMN_ID, m.INVOICE_BANK_ACCOUNT_COLUMN_ID];
-  const fields = `cursor items { id name group { title } assets { id } column_values(ids: ${JSON.stringify(ids)}) { id text value ... on BoardRelationValue { linked_item_ids } } }`;
+  const fields = `cursor items { id name group { title } assets { id } updates(limit: 5) { text_body } column_values(ids: ${JSON.stringify(ids)}) { id text value ... on BoardRelationValue { linked_item_ids } } }`;
   const items: Item[] = [];
   let cursor: string | null = null;
   do {
@@ -36,11 +36,6 @@ async function main() {
   const inReview = items.filter((it) => (col(it, "status8")?.text || "") === "בבדיקה");
   console.log(`total items: ${items.length}, in "בבדיקה": ${inReview.length}`);
 
-  // bank details stored on artists (one fetch)
-  const artistIds = [...new Set(inReview.map((it) => col(it, m.INVOICE_ARTIST_RELATION_COLUMN_ID)?.linked_item_ids?.[0]).filter(Boolean))] as string[];
-  const bank = new Map<string, { beneficiaryName: string; bankCode: string; bankBranch: string; bankAccount: string }>();
-  for (const aid of artistIds) { try { bank.set(aid, await m.getArtistBankDetailsFields(aid)); } catch { /* keep missing */ } }
-
   const pass: { it: Item; reasonsNote: string }[] = [];
   const hold: { it: Item; reasons: string[] }[] = [];
   for (const it of inReview) {
@@ -49,19 +44,11 @@ async function main() {
     const expected = parseFloat(col(it, m.INVOICE_AMOUNT_EXPECTED_COLUMN_ID)?.text || "0") || 0;
     const reported = parseFloat(col(it, m.INVOICE_AMOUNT_REPORTED_COLUMN_ID)?.text || "0") || expected;
     const note = col(it, m.INVOICE_AMOUNT_NOTE_COLUMN_ID)?.text || "";
-    const aid = col(it, m.INVOICE_ARTIST_RELATION_COLUMN_ID)?.linked_item_ids?.[0];
-    const stored = aid ? bank.get(aid) : undefined;
-    const bankChanged = !stored ? true :
-      stored.beneficiaryName !== (col(it, m.INVOICE_BANK_BENEFICIARY_COLUMN_ID)?.text || "") ||
-      stored.bankCode !== (col(it, m.INVOICE_BANK_CODE_COLUMN_ID)?.text || "") ||
-      stored.bankBranch !== (col(it, m.INVOICE_BANK_BRANCH_COLUMN_ID)?.text || "") ||
-      stored.bankAccount !== (col(it, m.INVOICE_BANK_ACCOUNT_COLUMN_ID)?.text || "");
     const d = decideInvoiceReview({
       submissionType: subType,
       matchStatus: match === INVOICE_MATCH_STATUS.NEEDS_REVIEW ? match : "",
       expectedAmount: expected, reportedAmount: reported, amountNote: note,
       fileAttached: it.assets.length > 0,
-      bankDetailsChanged: bankChanged,
     });
     // match status from the record itself is authoritative for old rows
     if (match === INVOICE_MATCH_STATUS.REQUEST_DIFFERENT || match === INVOICE_MATCH_STATUS.RECEIPT_DIFFERENT) {
@@ -82,9 +69,15 @@ async function main() {
   let moved = 0, annotated = 0;
   for (const { it } of pass) {
     await m.setInvoicePaymentStatus(it.id, m.INVOICE_PAYMENT_STATUS.TRANSFER);
+    // רשומה שנעצרה קודם עם אפדייט סיבות — מסבירים למה היא זזה עכשיו
+    if (it.updates.some((u) => u.text_body.includes("נשאר בבדיקה"))) {
+      await m.createInvoiceUpdate(it.id, "✅ הועבר לתשלום — הסיבה שנרשמה למעלה אינה נחשבת עוד חריגה (הכללים עודכנו).");
+    }
     moved++;
   }
   for (const { it, reasons } of hold) {
+    // לא כותבים שוב אפדייט זהה על רשומה שכבר סומנה
+    if (it.updates.some((u) => u.text_body.includes("נשאר בבדיקה"))) continue;
     await m.createInvoiceUpdate(it.id, "🔁 סיווג רטרואקטיבי — " + formatInvoiceReviewUpdate({ exceptional: true, reasons }));
     annotated++;
   }
