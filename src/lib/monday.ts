@@ -1029,34 +1029,50 @@ export async function getOpenOrders() {
 
 // ─── Query: Get all orders with subitems (admin) ──────────────────────────────
 
-export async function getAllOrders() {
-  const query = `
-    query {
-      boards(ids: [${BOARDS.ORDERS}]) {
-        items_page(limit: 200) {
-          items {
-            id
-            name
-            column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ODT_REQUIRED_COLUMN_ID}", "${ODT_ASSIGNED_COLUMN_ID}", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
-              id
-              text
-              value
-            }
-            subitems {
-              id
-              name
-              column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "${SUBITEM_ROLE_COLUMN_ID}", "${SUBITEM_ARTIST_TYPE_COLUMN_ID}", "color_mm3pd8vf", "${SUBITEM_INVOICE_RELATION_COLUMN_ID}"]) {
-                ${MONDAY_COLUMN_VALUE_FIELDS}
-              }
-            }
-          }
+/**
+ * כל ההזמנות בלוח, עם דפדוף. בלי דפדוף Monday מחזיר 200 לכל היותר וחותך את
+ * הקבוצות האחרונות בלוח ("הסתיים", "הסטוריה") — כלומר בדיוק את אירועי העבר
+ * שמנהלים צריכים לראות ושאומנים מגישים עליהם חשבוניות.
+ */
+export async function getAllOrders(): Promise<MondayItem[]> {
+  const itemFields = `
+    items {
+      id
+      name
+      column_values(ids: ["date_mm18mqn2", "color_mm18ej76", "text_mm1894y7", "numeric_mm185aw7", "numeric_mm18d914", "${ODT_REQUIRED_COLUMN_ID}", "${ODT_ASSIGNED_COLUMN_ID}", "${ORDER_ACTIVITY_HOURS_COLUMN_ID}"]) {
+        id
+        text
+        value
+      }
+      subitems {
+        id
+        name
+        column_values(ids: ["board_relation_mm18r4da", "dropdown_mm18519p", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "${SUBITEM_ROLE_COLUMN_ID}", "${SUBITEM_ARTIST_TYPE_COLUMN_ID}", "color_mm3pd8vf", "${SUBITEM_INVOICE_RELATION_COLUMN_ID}"]) {
+          ${MONDAY_COLUMN_VALUE_FIELDS}
         }
       }
-    }
-  `;
+    }`;
 
-  const data = await mondayQuery<{ boards: MondayBoard[] }>(query);
-  return data.boards[0]?.items_page?.items ?? [];
+  type Page = { cursor?: string | null; items: MondayItem[] };
+  const items: MondayItem[] = [];
+  let cursor: string | null = null;
+  do {
+    let page: Page | undefined;
+    if (cursor) {
+      const data: { next_items_page: Page } = await mondayQuery<{ next_items_page: Page }>(
+        `query { next_items_page(limit: 200, cursor: "${cursor}") { cursor ${itemFields} } }`
+      );
+      page = data.next_items_page;
+    } else {
+      const data: { boards: { items_page: Page }[] } = await mondayQuery<{ boards: { items_page: Page }[] }>(
+        `query { boards(ids: [${BOARDS.ORDERS}]) { items_page(limit: 200) { cursor ${itemFields} } } }`
+      );
+      page = data.boards[0]?.items_page;
+    }
+    items.push(...(page?.items ?? []));
+    cursor = page?.cursor ?? null;
+  } while (cursor);
+  return items;
 }
 
 export async function getOrdersByIdsForInvoice(orderIds: string[]): Promise<MondayItem[]> {
