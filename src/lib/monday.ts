@@ -1224,10 +1224,13 @@ export function withCandidacyDateConflictFlags(orders: AdminOrderDto[]): AdminOr
             candidacyDateConflictMessage: "",
           };
         }
+        const otherName = (conflict.orderName || "").split("|")[0].trim();
         return {
           ...sub,
           hasCandidacyDateConflict: true,
-          candidacyDateConflictMessage: "אושר לאירוע באותו תאריך",
+          candidacyDateConflictMessage: otherName
+            ? `מאושר באותו יום ל"${otherName}"`
+            : "אושר לאירוע באותו תאריך",
         };
       }),
     };

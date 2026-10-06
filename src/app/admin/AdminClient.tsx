@@ -630,7 +630,8 @@ function OrderAccordion({
     orderId: string,
     subitemId: string,
     action: "confirm" | "reject",
-    mode: "candidacy" | "arrival"
+    mode: "candidacy" | "arrival",
+    force?: boolean
   ) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -954,7 +955,7 @@ function OrderAccordion({
             orderId={order.id}
             registrants={registrants}
             statusMode={statusMode}
-            onConfirm={(subitemId, action) => onConfirm(order.id, subitemId, action, statusMode)}
+            onConfirm={(subitemId, action, force) => onConfirm(order.id, subitemId, action, statusMode, force)}
           />
         </div>
       )}
@@ -1214,12 +1215,13 @@ export default function AdminClient({ user }: AdminClientProps) {
     orderId: string,
     subitemId: string,
     action: "confirm" | "reject",
-    mode: "candidacy" | "arrival"
+    mode: "candidacy" | "arrival",
+    force?: boolean
   ) {
     const res = await fetch("/api/admin/confirm", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderId, subitemId, action, mode }),
+      body: JSON.stringify({ orderId, subitemId, action, mode, force: force || undefined }),
     });
 
     const data = await res.json();

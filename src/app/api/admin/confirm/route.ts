@@ -21,11 +21,13 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { orderId, subitemId, action, mode } = body as {
+    const { orderId, subitemId, action, mode, force } = body as {
       orderId: string;
       subitemId: string;
       action: "confirm" | "reject";
       mode: "candidacy" | "arrival";
+      /** מנהל אישר במפורש למרות התנגשות תאריך (אחרי אזהרה) */
+      force?: boolean;
     };
 
     if (!orderId || !subitemId || !action || !mode) {
@@ -48,9 +50,17 @@ export async function PATCH(request: NextRequest) {
       if (action === "confirm") {
         const conflict = await getCandidacyDateConflictForSubitem(orderId, subitemId);
         if (conflict.hasConflict) {
-          return NextResponse.json(
-            { error: conflict.message || "לא ניתן לאשר - האומן כבר מאושר באירוע אחר באותו תאריך" },
-            { status: 409 }
+          if (!force) {
+            return NextResponse.json(
+              {
+                error: conflict.message || "לא ניתן לאשר - האומן כבר מאושר באירוע אחר באותו תאריך",
+                dateConflict: true,
+              },
+              { status: 409 }
+            );
+          }
+          console.log(
+            `[admin/confirm] date-conflict override by ${session.name} (${session.id}): order ${orderId}, subitem ${subitemId} — ${conflict.message}`
           );
         }
       }

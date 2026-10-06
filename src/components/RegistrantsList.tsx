@@ -19,7 +19,7 @@ interface RegistrantsListProps {
   orderId: string;
   registrants: Registrant[];
   statusMode: StatusMode;
-  onConfirm: (subitemId: string, action: "confirm" | "reject") => Promise<void>;
+  onConfirm: (subitemId: string, action: "confirm" | "reject", force?: boolean) => Promise<void>;
 }
 
 function AttendanceBadge({ status }: { status: string }) {
@@ -51,7 +51,7 @@ function AttendanceBadge({ status }: { status: string }) {
 
 interface RegistrantRowProps {
   registrant: Registrant;
-  onAction: (action: "confirm" | "reject") => Promise<void>;
+  onAction: (action: "confirm" | "reject", force?: boolean) => Promise<void>;
   statusMode: StatusMode;
 }
 
@@ -69,10 +69,10 @@ function RegistrantRow({ registrant, onAction, statusMode }: RegistrantRowProps)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusMode, registrant.attendanceStatus, registrant.candidacyStatus]);
 
-  async function handleAction(action: "confirm" | "reject") {
+  async function handleAction(action: "confirm" | "reject", force?: boolean) {
     setLoading(action);
     try {
-      await onAction(action);
+      await onAction(action, force);
       setCurrentStatus(action === "confirm" ? "מאושר" : "נדחה");
     } finally {
       setLoading(null);
@@ -119,10 +119,23 @@ function RegistrantRow({ registrant, onAction, statusMode }: RegistrantRowProps)
 
         <div className="flex gap-1">
           <button
-            onClick={() => handleAction("confirm")}
-            disabled={!!loading || currentStatus === "מאושר" || confirmBlockedByDateConflict}
-            title={confirmBlockedByDateConflict ? (registrant.candidacyDateConflictMessage || "לא ניתן לאשר באותו תאריך") : "אשר"}
-            className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            onClick={() => {
+              // התנגשות תאריך: מותר למנהל לאשר בכל זאת, אחרי אזהרה מפורשת
+              if (confirmBlockedByDateConflict) {
+                const warning =
+                  `⚠️ ${registrant.name} כבר ${registrant.candidacyDateConflictMessage || "מאושר לאירוע אחר באותו תאריך"}.\n\n` +
+                  "לאשר אותו גם לאירוע הזה?";
+                if (!window.confirm(warning)) return;
+                handleAction("confirm", true);
+                return;
+              }
+              handleAction("confirm");
+            }}
+            disabled={!!loading || currentStatus === "מאושר"}
+            title={confirmBlockedByDateConflict ? `${registrant.candidacyDateConflictMessage || "מאושר לאירוע אחר באותו תאריך"} — ניתן לאשר בכל זאת` : "אשר"}
+            className={`p-1.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${
+              confirmBlockedByDateConflict ? "text-orange-600 hover:bg-orange-50" : "text-green-600 hover:bg-green-50"
+            }`}
           >
             {loading === "confirm" ? (
               <svg
@@ -218,7 +231,7 @@ export default function RegistrantsList({
         <RegistrantRow
           key={registrant.id}
           registrant={registrant}
-          onAction={(action) => onConfirm(registrant.id, action)}
+          onAction={(action, force) => onConfirm(registrant.id, action, force)}
           statusMode={statusMode}
         />
       ))}
