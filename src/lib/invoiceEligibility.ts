@@ -66,6 +66,24 @@ export interface InvoiceEligibilityInput {
   candidacyStatus?: string | null;
   attendanceStatus?: string | null;
   invoiceStatus?: string | null;
+  /**
+   * האם קיימת בלוח החשבוניות רשומה עבור ההרשמה הזו.
+   * false = הסטטוס "הוגשה" על הסאב-אייטם הוא שריד של חשבונית שנמחקה — החודש פתוח להגשה מחדש.
+   * undefined = לא נבדק — הסטטוס לבדו חוסם (ההתנהגות הישנה).
+   */
+  hasExistingInvoice?: boolean;
+}
+
+/**
+ * לוח החשבוניות הוא מקור האמת: סטטוס "הוגשה" על הסאב-אייטם חוסם רק כל עוד
+ * החשבונית שעבורה נכתב עדיין קיימת. מחיקה של החשבונית מהלוח פותחת את ההגשה מחדש.
+ */
+export function isSubitemInvoiceEffectivelyBlocked(
+  invoiceStatus: string | null | undefined,
+  hasExistingInvoice?: boolean
+): boolean {
+  if (!isSubitemInvoiceBlocked(invoiceStatus?.trim() || "")) return false;
+  return hasExistingInvoice !== false;
 }
 
 export function isInvoiceStatusEligible(input: InvoiceEligibilityInput): boolean {
@@ -79,6 +97,8 @@ export function isInvoiceStatusEligible(input: InvoiceEligibilityInput): boolean
 }
 
 export function canSubmitInvoice(input: InvoiceEligibilityInput): boolean {
-  const invoiceStatus = input.invoiceStatus?.trim() || "";
-  return isInvoiceStatusEligible(input) && !isSubitemInvoiceBlocked(invoiceStatus);
+  return (
+    isInvoiceStatusEligible(input) &&
+    !isSubitemInvoiceEffectivelyBlocked(input.invoiceStatus, input.hasExistingInvoice)
+  );
 }

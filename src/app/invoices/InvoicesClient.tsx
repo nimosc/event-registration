@@ -133,13 +133,16 @@ function getLastMonthKeys(count: number): string[] {
   return keys;
 }
 
+// לוח החשבוניות הוא מקור האמת: סטטוס "הוגשה" על ההרשמה נחשב רק כל עוד קיימת
+// חשבונית עבורה. אם החשבונית נמחקה מהלוח — ההרשמה חוזרת להיות פתוחה להגשה.
 function isRegistrationInvoiceComplete(
   reg: Registration,
   invoiceList: InvoiceDto[]
 ): boolean {
-  if (isSubitemInvoiceComplete(reg.invoiceStatus)) return true;
   const related = resolveInvoiceForRegistration(reg, invoiceList);
-  return isInvoiceSubmissionComplete(related?.submissionStatus || "");
+  if (!related) return false;
+  if (isSubitemInvoiceComplete(reg.invoiceStatus)) return true;
+  return isInvoiceSubmissionComplete(related.submissionStatus || "");
 }
 
 function isRegistrationAwaitingAccounting(
@@ -147,9 +150,20 @@ function isRegistrationAwaitingAccounting(
   invoiceList: InvoiceDto[]
 ): boolean {
   if (isRegistrationInvoiceComplete(reg, invoiceList)) return false;
-  if (isSubitemAwaitingAccounting(reg.invoiceStatus)) return true;
   const related = resolveInvoiceForRegistration(reg, invoiceList);
-  return isAwaitingAccountingDocument(related?.submissionStatus || "");
+  if (!related) return false;
+  if (isSubitemAwaitingAccounting(reg.invoiceStatus)) return true;
+  return isAwaitingAccountingDocument(related.submissionStatus || "");
+}
+
+function canRegistrationSubmitInvoice(
+  reg: Registration,
+  invoiceList: InvoiceDto[]
+): boolean {
+  return canSubmitInvoice({
+    ...reg,
+    hasExistingInvoice: resolveInvoiceForRegistration(reg, invoiceList) !== null,
+  });
 }
 
 function resolveInvoiceForRegistration(
@@ -439,7 +453,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, [awaitingAccountingRegsInMonth, pendingAccountingInvoiceForSelectedMonth]);
   const submittedCount = filtered.filter((r) => isRegistrationInvoiceComplete(r, invoices)).length;
   const awaitingAccountingCount = filtered.filter((r) => isRegistrationAwaitingAccounting(r, invoices)).length;
-  const readyToSubmitCount = filtered.filter((r) => canSubmitInvoice(r)).length;
+  const readyToSubmitCount = filtered.filter((r) => canRegistrationSubmitInvoice(r, invoices)).length;
   const showVoluntaryUpload =
     selectedMonth !== "all" &&
     Boolean(artistStatus) &&
@@ -1165,7 +1179,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   type="button"
                   onClick={() => {
                     const invoiceEligible = new Set(
-                      filtered.filter((r) => canSubmitInvoice(r)).map((r) => r.orderId)
+                      filtered.filter((r) => canRegistrationSubmitInvoice(r, invoices)).map((r) => r.orderId)
                     );
                     setMonthSelectedOrderIds(invoiceEligible);
                     setShowMonthInvoiceModal(true);
@@ -1630,7 +1644,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
 
         {showMonthInvoiceModal && filtered.length > 0 && selectedMonth !== "all" && (() => {
           const selectedRegs = filtered
-            .filter((r) => monthSelectedOrderIds.has(r.orderId) && canSubmitInvoice(r))
+            .filter((r) => monthSelectedOrderIds.has(r.orderId) && canRegistrationSubmitInvoice(r, invoices))
             .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
           const selectedIncomeBySubitemId: Record<string, number> = {};
           let monthTotal = 0;
@@ -1674,13 +1688,8 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 <div className="p-6 overflow-y-auto flex-1">
                   <ul className="mb-5 divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden text-sm">
                     {filtered.map((reg) => {
-                      const relatedInvoiceForReg = invoices.find((inv) =>
-                        (inv.orderIds || []).some((id) => String(id) === String(reg.orderId))
-                      );
-                      const alreadyInvoiced =
-                        isSubitemInvoiceComplete(reg.invoiceStatus)
-                        || isSubitemAwaitingAccounting(reg.invoiceStatus)
-                        || Boolean(relatedInvoiceForReg);
+                      // חשבונית קיימת בלוח (לפי קישור או לפי אירוע) היא מה שקובע — לא הסטטוס לבדו
+                      const alreadyInvoiced = resolveInvoiceForRegistration(reg, invoices) !== null;
                       const selected = monthSelectedOrderIds.has(reg.orderId);
                       const amount = selectedIncomeBySubitemId[reg.subitemId] ?? 0;
                       const requiresClaim = reg.attendanceStatus !== "מאושר";

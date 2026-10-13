@@ -13,6 +13,8 @@ import {
   mapMondayAttendanceToInternal,
   mapMondayCandidacyToInternal,
   parseLinkedItemIds,
+  getLinkedItemIdsFromColumn,
+  SUBITEM_INVOICE_RELATION_COLUMN_ID,
   attachInvoiceFileWithRetry,
   setInvoiceFileState,
   INVOICE_FILE_STATUS,
@@ -261,15 +263,26 @@ async function handleInvoiceSubmit(req: NextRequest) {
         const attendanceCol = sub.column_values.find((cv) => cv.id === "color_mm18bjdk");
         const candidacyCol = sub.column_values.find((cv) => cv.id === "color_mm1q61p2");
         const invoiceStatusCol = sub.column_values.find((cv) => cv.id === "color_mm3pd8vf");
+        const invoiceRelationCol = sub.column_values.find(
+          (cv) => cv.id === SUBITEM_INVOICE_RELATION_COLUMN_ID
+        );
         const linkedIds = parseLinkedItemIds(relationCol?.value);
         const belongsToArtist = linkedIds.includes(artistId) || sub.name.trim() === session.name.trim();
         if (!belongsToArtist) continue;
+
+        // לוח החשבוניות הוא מקור האמת: סטטוס "הוגשה" על הסאב-אייטם חוסם רק אם
+        // החשבונית (לפי הקישור, או לפי האירוע) עדיין קיימת בלוח. נמחקה — פתוח להגשה.
+        const linkedInvoiceIds = new Set(getLinkedItemIdsFromColumn(invoiceRelationCol));
+        const hasExistingInvoice = existingInvoices.some(
+          (inv) => linkedInvoiceIds.has(String(inv.id)) || inv.orderIds.some((id) => String(id) === String(order.id))
+        );
 
         if (
           canSubmitInvoice({
             attendanceStatus: mapMondayAttendanceToInternal(attendanceCol?.text || ""),
             candidacyStatus: mapMondayCandidacyToInternal(candidacyCol?.text || ""),
             invoiceStatus: invoiceStatusCol?.text || "",
+            hasExistingInvoice,
           })
         ) {
           eligibleOrderIds.add(order.id);

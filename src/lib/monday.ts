@@ -1095,7 +1095,7 @@ export async function getOrdersByIdsForInvoice(orderIds: string[]): Promise<Mond
         subitems {
           id
           name
-          column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3pd8vf"]) {
+          column_values(ids: ["board_relation_mm18r4da", "color_mm18bjdk", "${CANDIDACY_STATUS_COLUMN_ID}", "color_mm3pd8vf", "${SUBITEM_INVOICE_RELATION_COLUMN_ID}"]) {
             ${MONDAY_COLUMN_VALUE_FIELDS}
           }
         }
