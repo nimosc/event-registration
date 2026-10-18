@@ -321,6 +321,9 @@ async function handleInvoiceSubmit(req: NextRequest) {
     ? signedExtraction ?? (extractionPromise ? await extractionPromise : null)
     : null;
   const extractedAmount = extractedInvoice?.amount ?? undefined;
+  // סכום שונה מהקובץ מותר רק כשהאומן נתן סיבה (בהגשה חודשית) — אז זה לא נחסם
+  // אלא נשאר "בבדיקה" עם שני הסכומים באפדייט (decideInvoiceReview).
+  const allowFileAmountMismatch = !voluntarySubmission && Boolean(normalizedAmountNote);
 
   let fillBothColumns = false;
   let needsTypeReview = false;
@@ -329,7 +332,7 @@ async function handleInvoiceSubmit(req: NextRequest) {
       extracted: extractedInvoice,
       expectedAmount: reportedAmount,
       declaredNumber: invoiceNumber,
-      requireAmountWhenExtracted: true,
+      requireAmountWhenExtracted: !allowFileAmountMismatch,
       requireNumberWhenBothPresent: documentConfig.kind !== "payment_request",
     });
     if (validationError) {
@@ -426,6 +429,7 @@ async function handleInvoiceSubmit(req: NextRequest) {
     reportedAmount,
     amountNote: normalizedAmountNote,
     fileAttached,
+    extractedAmount,
   });
   try {
     await setInvoicePaymentStatus(

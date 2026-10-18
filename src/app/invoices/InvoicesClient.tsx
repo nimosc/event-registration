@@ -297,8 +297,13 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
       if (invoiceAmountsDiffer(expectedAmount, reported) && !customAmountNote.trim()) {
         return "סיבה לשינוי הסכום";
       }
-      if (extractedActualAmount != null && !invoiceAmountsMatch(reported, extractedActualAmount)) {
-        return "הסכום בקובץ לא תואם לסכום להגשה";
+      // סכום שונה מהקובץ מותר עם סיבה — הבקשה תישאר "בבדיקה" ידנית
+      if (
+        extractedActualAmount != null &&
+        !invoiceAmountsMatch(reported, extractedActualAmount) &&
+        !(customAmountEnabled && customAmountNote.trim())
+      ) {
+        return "הסכום בקובץ לא תואם לסכום להגשה — סמן \"שנה את סכום החשבונית\" ופרט סיבה";
       }
       return "";
     },
@@ -1657,7 +1662,10 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           const selectedSubitemIds = selectedRegs.map((r) => r.subitemId);
           const firstDate = selectedRegs[0]?.date || filtered[0]?.date || "";
           const reportedAmount = getReportedInvoiceAmount(monthTotal, customAmountEnabled, customAmountValue);
-          const amountChanged = invoiceAmountsDiffer(monthTotal, reportedAmount);
+          const fileAmountMismatch =
+            extractedActualAmount != null && !invoiceAmountsMatch(reportedAmount, extractedActualAmount);
+          // סיבה נדרשת גם כשהסכום שווה למחושב אבל שונה ממה שנקרא מהקובץ
+          const amountChanged = invoiceAmountsDiffer(monthTotal, reportedAmount) || fileAmountMismatch;
           const submitBlockReason = getSubmitBlockingReason(selectedOrderIds.length, monthTotal);
           const effectiveAmount = reportedAmount;
           return (
@@ -1917,6 +1925,11 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                                 value={customAmountNote}
                                 onChange={(e) => setCustomAmountNote(e.target.value)}
                               />
+                              {fileAmountMismatch && (
+                                <p className="mt-2 text-xs text-amber-700">
+                                  הסכום שונה ממה שנקרא מהקובץ ({extractedActualAmount?.toLocaleString("he-IL")} ₪) — הבקשה תועבר לבדיקה ידנית לפני תשלום.
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>

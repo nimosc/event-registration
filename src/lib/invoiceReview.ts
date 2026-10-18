@@ -19,6 +19,8 @@ export interface InvoiceReviewInput {
   reportedAmount: number;
   amountNote: string;
   fileAttached: boolean;
+  /** הסכום שחולץ מהקובץ (undefined כשלא חולץ) */
+  extractedAmount?: number;
 }
 
 // שינוי פרטי בנק אינו חריג בכוונה: הפרטים החדשים נשמרים על האומן אוטומטית
@@ -46,6 +48,18 @@ export function decideInvoiceReview(input: InvoiceReviewInput): InvoiceReviewDec
     const note = input.amountNote.trim();
     reasons.push(
       `הסכום שדווח (${formatIls(input.reportedAmount)}) שונה מהסכום המחושב (${formatIls(input.expectedAmount)})` +
+        (note ? ` — סיבת האומן: ${note}` : "")
+    );
+  }
+
+  // האומן הגיש סכום שונה ממה שנקרא מהקובץ (מותר רק עם סיבה) — המנהל צריך לראות את הפער.
+  if (
+    input.extractedAmount != null &&
+    !invoiceAmountsMatch(input.reportedAmount, input.extractedAmount)
+  ) {
+    const note = input.amountNote.trim();
+    reasons.push(
+      `הסכום שנקרא מהקובץ (${formatIls(input.extractedAmount)}) שונה מהסכום שהאומן דיווח (${formatIls(input.reportedAmount)})` +
         (note ? ` — סיבת האומן: ${note}` : "")
     );
   }
