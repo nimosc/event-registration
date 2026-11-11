@@ -69,6 +69,8 @@ interface InvoiceSubmitResponse {
   fileAttached?: boolean;
   /** true = אותה הגשה כבר נקלטה קודם — לא נוצרה כפילות */
   duplicate?: boolean;
+  /** הבקשה נקלטה, אבל התשלום ממתין עד שתוסדר קבלה חסרה */
+  heldForMissingReceipt?: boolean;
 }
 
 function submitOutcomeMessage(data: InvoiceSubmitResponse, defaultMessage: string): string {
@@ -76,6 +78,9 @@ function submitOutcomeMessage(data: InvoiceSubmitResponse, defaultMessage: strin
     return "הרשומה נקלטה, אך צירוף הקובץ ל-Monday נכשל — ניתן לצרף שוב מרשימת החשבוניות";
   }
   if (data.duplicate) return "ההגשה הזו כבר נקלטה קודם — לא נוצרה רשומה כפולה";
+  if (data.heldForMissingReceipt) {
+    return `${defaultMessage}. שים לב: התשלום לא יועבר עד שתעלה את הקבלה החסרה על התשלומים הקודמים.`;
+  }
   return defaultMessage;
 }
 
@@ -484,7 +489,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     (awaitingAccountingRegsInMonth.length > 0 ||
       invoicesInSelectedMonth.some((inv) => isAwaitingAccountingDocument(inv.submissionStatus)));
   // שוטף +60: בקשות תשלום שכבר שולמו לפי תנאי התשלום וטרם הועלה עליהן מסמך חשבונאי.
-  // כל עוד יש כאלה — הגשת בקשת תשלום חדשה חסומה.
+  // מוצגת עליהן תזכורת בלבד — הן לא חוסמות הגשת בקשת תשלום חדשה (הוחלט 2026-11-11).
   const overduePaymentRequests = useMemo(
     () =>
       invoices.filter(
@@ -824,12 +829,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
   }, [artistBankDetails]);
 
   const handleSubmitVoluntaryInvoice = useCallback(async () => {
-    if (hasOverduePaymentRequests) {
-      setError(
-        `לפי תנאי התשלום (שוטף +60), קיימת בקשת תשלום שכבר שולמה — יש להעלות ${followUpAccountingDocument.fileLabel} עליה לפני הגשת בקשה חדשה`
-      );
-      return;
-    }
     const monthError = getInvoiceMonthSubmissionError(selectedMonth);
     if (monthError) {
       setError(monthError);
@@ -937,12 +936,6 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
     monthLabel: string,
     monthKey: string
   ) => {
-    if (hasOverduePaymentRequests) {
-      setError(
-        `לפי תנאי התשלום (שוטף +60), קיימת בקשת תשלום שכבר שולמה — יש להעלות ${followUpAccountingDocument.fileLabel} עליה לפני הגשת בקשה חדשה`
-      );
-      return;
-    }
     const monthError = getInvoiceMonthSubmissionError(monthKey);
     if (monthError) {
       setError(monthError);
@@ -1179,7 +1172,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 </button>
               ))}
               </div>
-              {monthSubmitAvailable && !hasOverduePaymentRequests && (
+              {monthSubmitAvailable && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1207,7 +1200,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                   העלה בקשת תשלום לחודש
                 </button>
               )}
-              {showVoluntaryUpload && !hasOverduePaymentRequests && (
+              {showVoluntaryUpload && (
                 <button
                   type="button"
                   onClick={openVoluntaryModal}
@@ -1225,8 +1218,8 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           </div>
         )}
 
-        {!loading && hasOverduePaymentRequests && (monthSubmitAvailable || showVoluntaryUpload) && (
-          <div className="mb-6 rounded-2xl border-2 border-rose-300 bg-rose-50 p-5 sm:p-6">
+        {!loading && hasOverduePaymentRequests && (
+          <div role="alert" className="mb-6 rounded-2xl border-2 border-rose-400 bg-rose-50 p-5 sm:p-6">
             <div className="flex items-start gap-3.5">
               <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-rose-600">
                 <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1235,11 +1228,13 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
               </span>
               <div className="flex-1">
                 <p className="text-lg sm:text-xl font-bold text-rose-900 leading-snug">
-                  לפני שמעלים בקשת תשלום חדשה — יש להשלים {followUpAccountingDocument.fileLabel}
+                  חובה להעלות {followUpAccountingDocument.fileLabel} עבור{" "}
+                  {overduePaymentRequests.map((inv) => monthKeyToLabel(parseInvoiceMonthKey(inv.date))).join(", ")}
                 </p>
                 <p className="mt-1.5 text-sm sm:text-base text-rose-800 leading-relaxed">
-                  לפי תנאי התשלום (שוטף +60), התשלום על הבקשות הבאות כבר בוצע. כדי להגיש בקשת
-                  תשלום חדשה, יש להעלות עליהן קודם {followUpAccountingDocument.fileLabel}:
+                  התשלום על החודשים האלה כבר הועבר אליך (שוטף +60).{" "}
+                  <strong>עד שלא תעלה את ה{followUpAccountingDocument.fileLabel} — לא יועברו אליך תשלומים נוספים.</strong>{" "}
+                  אפשר להמשיך להגיש בקשות תשלום, והן ימתינו לתשלום עד שהקבלה תוסדר.
                 </p>
                 <ul className="mt-3 space-y-2">
                   {overduePaymentRequests.map((inv) => (
@@ -1264,7 +1259,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
           selectedMonthConsideredPaid ? (
             <div className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 sm:p-6">
               <div className="flex items-start gap-3.5">
-                <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-amber-500">
+                <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-rose-600">
                   <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
@@ -1350,7 +1345,7 @@ export default function InvoicesClient({ user }: InvoicesClientProps) {
                 ? "אין אירועים זכאים לחשבונית בטווח שנבחר"
                 : `אין אירועים זכאים לחשבונית ב${monthKeyToLabel(selectedMonth)}`}
             </p>
-            {showVoluntaryUpload && !hasOverduePaymentRequests && (
+            {showVoluntaryUpload && (
               <div className="mt-6 max-w-lg mx-auto space-y-4">
                 <p className="text-sm text-gray-600 leading-relaxed">
                   במידה וחסר מידע במערכת, מוזמנים להעלות{" "}

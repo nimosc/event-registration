@@ -38,7 +38,6 @@ import {
 } from "@/lib/invoiceEligibility";
 import {
   checkDocumentTypeForPaymentRequest,
-  getAccountingDocumentLabel,
   getInitialDocumentForTaxStatus,
   INVOICE_MATCH_STATUS,
   INVOICE_SUBMISSION_STATUS,
@@ -187,25 +186,17 @@ async function handleInvoiceSubmit(req: NextRequest) {
   }
   const documentConfig = getInitialDocumentForTaxStatus(taxStatus);
 
-  // שוטף +60: אם קיימת בקשת תשלום שכבר שולמה לפי תנאי התשלום וטרם הועלה עליה
-  // מסמך חשבונאי — חוסמים הגשת בקשה חדשה עד שהיא תושלם.
+  // בקשת תשלום שכבר שולמה (שוטף +60) וחסר עליה מסמך חשבונאי לא חוסמת הגשה חדשה,
+  // אבל הבקשה החדשה נשארת "בבדיקה" — לא מעבירים תשלומים נוספים עד שהקבלה תוסדר.
+  // הוחלט 2026-11-11.
   const existingInvoices = await existingInvoicesPromise;
-  const overduePaidRequests = existingInvoices.filter(
-    (inv) =>
-      inv.submissionStatus === INVOICE_SUBMISSION_STATUS.PAYMENT_REQUEST &&
-      isPaymentRequestConsideredPaid(inv.date)
-  );
-  if (overduePaidRequests.length > 0) {
-    const accountingLabel = getAccountingDocumentLabel(taxStatus);
-    return NextResponse.json(
-      {
-        error: `לפי תנאי התשלום (שוטף +60), התשלום עבור ${overduePaidRequests
-          .map((inv) => inv.name)
-          .join(", ")} כבר בוצע — יש להעלות ${accountingLabel} עליו לפני הגשת בקשת תשלום חדשה`,
-      },
-      { status: 409 }
-    );
-  }
+  const missingReceiptMonths = existingInvoices
+    .filter(
+      (inv) =>
+        inv.submissionStatus === INVOICE_SUBMISSION_STATUS.PAYMENT_REQUEST &&
+        isPaymentRequestConsideredPaid(inv.date)
+    )
+    .map((inv) => (inv.name.split(" - ")[1] || inv.date).trim());
 
   let resolvedOrderIds = orderIds;
   let resolvedSubitemIds = subitemIds;
@@ -430,6 +421,7 @@ async function handleInvoiceSubmit(req: NextRequest) {
     amountNote: normalizedAmountNote,
     fileAttached,
     extractedAmount,
+    missingReceiptMonths,
   });
   try {
     await setInvoicePaymentStatus(
@@ -480,6 +472,8 @@ async function handleInvoiceSubmit(req: NextRequest) {
     success: true,
     invoiceId: result.id,
     fileAttached,
+    /** הבקשה נקלטה אבל התשלום ממתין עד שתוסדר הקבלה החסרה */
+    heldForMissingReceipt: missingReceiptMonths.length > 0,
     submissionStatus: documentConfig.submissionStatus,
     documentKind: documentConfig.kind,
   });

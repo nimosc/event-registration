@@ -21,6 +21,11 @@ export interface InvoiceReviewInput {
   fileAttached: boolean;
   /** הסכום שחולץ מהקובץ (undefined כשלא חולץ) */
   extractedAmount?: number;
+  /**
+   * חודשים (בשמם, למשל "יולי 2026") שעליהם האומן כבר קיבל תשלום לפי שוטף +60
+   * וטרם העלה מסמך חשבונאי. כל עוד יש כאלה — לא מעבירים לו תשלומים נוספים.
+   */
+  missingReceiptMonths?: string[];
 }
 
 // שינוי פרטי בנק אינו חריג בכוונה: הפרטים החדשים נשמרים על האומן אוטומטית
@@ -70,6 +75,12 @@ export function decideInvoiceReview(input: InvoiceReviewInput): InvoiceReviewDec
 
   if (!input.fileAttached) {
     reasons.push("הקובץ לא צורף לרשומה ב-Monday — אין מסמך לבדוק");
+  }
+
+  if (input.missingReceiptMonths?.length) {
+    reasons.push(
+      `חסר מסמך חשבונאי (קבלה) על תשלום שכבר בוצע עבור: ${input.missingReceiptMonths.join(", ")} — לא להעביר תשלום עד שיוסדר`
+    );
   }
 
   return { exceptional: reasons.length > 0, reasons };
