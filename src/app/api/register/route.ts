@@ -6,6 +6,9 @@ import {
   deleteSubitem,
   getColumnValue,
   parseLinkedItemIds,
+  getLinkedItemIdsAsNumbers,
+  mapMondayCandidacyToInternal,
+  CANDIDACY_STATUS_COLUMN_ID,
   STATUS_CANCELLED,
   STATUS_ASSIGNMENT_DONE,
   STATUS_CANDIDACY_CLOSED,
@@ -177,7 +180,32 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Delete subitem
+    // ההרשמה חייבת להיות שייכת להזמנה הזו ולאומן המחובר — אחרת אפשר היה
+    // למחוק הרשמה של כל אחד לפי מזהה.
+    const subitem = (order.subitems || []).find((s) => s.id === subitemId);
+    const relationCol = subitem?.column_values.find((cv) => cv.id === "board_relation_mm18r4da");
+    const linkedIds = [
+      ...getLinkedItemIdsAsNumbers(relationCol),
+      ...parseLinkedItemIds(relationCol?.value),
+    ];
+    const ownsIt =
+      !!subitem &&
+      (linkedIds.includes(parseInt(session.id, 10)) ||
+        subitem.name.trim() === session.name.trim());
+    if (!ownsIt) {
+      return NextResponse.json({ error: "ההרשמה לא נמצאה" }, { status: 404 });
+    }
+
+    // מועמדות שכבר אושרה — האומן כבר קיבל הודעת שיבוץ ונכנס לקבוצה; ביטול עצמי
+    // והרשמה מחדש היו פותחים מועמדות חדשה וממתינה ומעלימים את האישור.
+    // ביטול כזה עושה מנהל בלבד. הוחלט 2026-11-26.
+    const candidacy = mapMondayCandidacyToInternal(
+      subitem.column_values.find((cv) => cv.id === CANDIDACY_STATUS_COLUMN_ID)?.text || ""
+    );
+    if (candidacy === "מאושר") {
+      return NextResponse.json({ error: "המועמדות שלך כבר אושרה — לביטול יש לפנות למנהל", approvedLocked: true }, { status: 403 });
+    }
+
     await deleteSubitem(subitemId);
 
     return NextResponse.json({ success: true });

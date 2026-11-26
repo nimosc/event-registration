@@ -171,7 +171,9 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
   }, [registrations, selectedMonth]);
 
   const today = new Date().toISOString().split("T")[0];
-  const canUnregister = (reg: Registration) => !reg.date || reg.date >= today;
+  const isPastReg = (reg: Registration) => !!reg.date && reg.date < today;
+  // מועמדות מאושרת לא מבוטלת עצמאית — רק מנהל (הוחלט 2026-11-26)
+  const canUnregister = (reg: Registration) => !isPastReg(reg) && reg.candidacyStatus !== "מאושר";
   const filteredTotalCount = filtered.length;
   const approvedCount = filtered.filter((r) => r.candidacyStatus === "מאושר").length;
   const pendingCount = filtered.filter((r) => !r.candidacyStatus).length;
@@ -315,6 +317,8 @@ export default function MyRegistrationsClient({ user }: MyRegistrationsClientPro
                           >
                             {unregisteringId === reg.subitemId ? "מבטל..." : "בטל מועמדות"}
                           </button>
+                        ) : !isPastReg(reg) && reg.candidacyStatus === "מאושר" ? (
+                          <span className="text-xs text-gray-500">לביטול יש לפנות למנהל</span>
                         ) : (
                           <span className="text-xs text-gray-400">לא ניתן לבטל</span>
                         )}

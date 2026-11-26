@@ -244,6 +244,11 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
                 נרשמת כ<span className={order.registeredAs === "ODT" ? "text-violet-700 font-semibold" : "text-blue-700 font-semibold"}>{order.registeredAs === "ODT" ? "-ODT" : "אומן"}</span>
               </div>
             )}
+            {isApproved ? (
+              <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-emerald-50 text-emerald-800 text-center border border-emerald-200">
+                המועמדות אושרה · לביטול יש לפנות למנהל
+              </div>
+            ) : (
             <button
               onClick={() => handleClick()}
               disabled={loading}
@@ -256,6 +261,7 @@ export default function OrderCard({ order, userRole, onRegister, onUnregister }:
                 בטל מועמדות
               </>}
             </button>
+            )}
             </>
           ) : !order.canRegister ? (
             <div className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 text-center">
