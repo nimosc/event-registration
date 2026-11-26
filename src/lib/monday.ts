@@ -1034,6 +1034,14 @@ export async function getOpenOrders() {
  * הקבוצות האחרונות בלוח ("הסתיים", "הסטוריה") — כלומר בדיוק את אירועי העבר
  * שמנהלים צריכים לראות ושאומנים מגישים עליהם חשבוניות.
  */
+/**
+ * גודל עמוד למשיכת כל ההזמנות. כל הזמנה מגיעה עם כל ההרשמות שלה, ועמוד של 200
+ * כבר לקח 13.5-14 שניות מול תקרת 15 שניות של mondayQuery (נובמבר 2026, 235
+ * הזמנות / ~2,400 הרשמות) — ונכשל בכל האטה של Monday. עמודים קטנים = אותו מידע,
+ * בלי קריאה בודדת שמתקרבת לתקרה.
+ */
+const ORDERS_PAGE_SIZE = 50;
+
 export async function getAllOrders(): Promise<MondayItem[]> {
   const itemFields = `
     items {
@@ -1060,12 +1068,12 @@ export async function getAllOrders(): Promise<MondayItem[]> {
     let page: Page | undefined;
     if (cursor) {
       const data: { next_items_page: Page } = await mondayQuery<{ next_items_page: Page }>(
-        `query { next_items_page(limit: 200, cursor: "${cursor}") { cursor ${itemFields} } }`
+        `query { next_items_page(limit: ${ORDERS_PAGE_SIZE}, cursor: "${cursor}") { cursor ${itemFields} } }`
       );
       page = data.next_items_page;
     } else {
       const data: { boards: { items_page: Page }[] } = await mondayQuery<{ boards: { items_page: Page }[] }>(
-        `query { boards(ids: [${BOARDS.ORDERS}]) { items_page(limit: 200) { cursor ${itemFields} } } }`
+        `query { boards(ids: [${BOARDS.ORDERS}]) { items_page(limit: ${ORDERS_PAGE_SIZE}) { cursor ${itemFields} } } }`
       );
       page = data.boards[0]?.items_page;
     }
